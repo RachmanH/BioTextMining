@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PharmaViz - Live Extraction Analysis</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #030712;
+      --bg-secondary: #0f172a;
+      --fg: #e8edf5;
+      --muted: #94a3b8;
+      --card: rgba(15, 23, 42, 0.85);
+      --border: rgba(148, 163, 184, 0.15);
+      --accent: #00ffcc;
+      --accent-rgb: 0, 255, 204;
+      --accent-secondary: #ff6b6b;
+      --color-drug: #00ffcc;
+      --color-mild: #fcd34d;
+      --color-moderate: #fb923c;
+      --color-severe: #f43f5e;
+      --link-color: #475569;
+      --node-stroke: #030712;
+      --orb-1: rgba(0, 255, 204, 0.06);
+      --orb-2: rgba(244, 63, 94, 0.04);
+      --grid-color: rgba(0, 255, 204, 0.015);
+    }
+
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --bg-secondary: #ffffff;
+      --fg: #0f172a;
+      --muted: #64748b;
+      --card: rgba(255, 255, 255, 0.85);
+      --border: rgba(15, 23, 42, 0.1);
+      --accent: #0d9488;
+      --accent-rgb: 13, 148, 136;
+      --accent-secondary: #e11d48;
+      --color-drug: #0d9488;
+      --color-mild: #d97706;
+      --color-moderate: #ea580c;
+      --color-severe: #dc2626;
+      --link-color: #cbd5e1;
+      --node-stroke: #ffffff;
+      --orb-1: rgba(13, 148, 136, 0.08);
+      --orb-2: rgba(225, 29, 72, 0.05);
+      --grid-color: rgba(13, 148, 136, 0.03);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: "Space Grotesk", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100vh;
+      overflow-x: hidden;
+      transition: background-color 0.4s ease, color 0.4s ease;
+    }
+
+    .mono { font-family: "JetBrains Mono", monospace; }
+
+    .bg-animated {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background:
+        radial-gradient(ellipse at 20% 30%, var(--orb-1) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 70%, var(--orb-2) 0%, transparent 50%);
+    }
+
+    .bg-grid {
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--grid-color) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+      background-size: 60px 60px;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
+    .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+    .stagger-1 { animation-delay: 0.1s; opacity: 0; }
+    .stagger-2 { animation-delay: 0.2s; opacity: 0; }
+    .stagger-3 { animation-delay: 0.3s; opacity: 0; }
+
+    .glass-card {
+      background: var(--card);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+      font-weight: 600;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 30px rgba(var(--accent-rgb), 0.25);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 40px rgba(var(--accent-rgb), 0.4);
+    }
+
+    .btn-icon {
+      background: rgba(var(--accent-rgb), 0.05);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      transition: all 0.3s ease;
+    }
+
+    .btn-icon:hover {
+      background: rgba(var(--accent-rgb), 0.1);
+      border-color: var(--accent);
+    }
+
+    .theme-toggle {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--card);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .theme-toggle:hover {
+      background: rgba(var(--accent-rgb), 0.1);
+      border-color: var(--accent);
+    }
+
+    .theme-toggle svg {
+      width: 20px;
+      height: 20px;
+      color: var(--fg);
+    }
+
+    .icon-sun { display: none; }
+    .icon-moon { display: block; }
+    [data-theme="light"] .icon-sun { display: block; }
+    [data-theme="light"] .icon-moon { display: none; }
+
+    .fullscreen-container {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: var(--bg);
+      display: none;
+    }
+
+    .fullscreen-container.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      transition: opacity 0.5s ease;
+    }
+
+    .loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    .chart-svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .node-label {
+      font-family: "Space Grotesk", sans-serif;
+      fill: var(--fg);
+      pointer-events: none;
+    }
+
+    .tooltip {
+      position: fixed;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      max-width: 360px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .tooltip.visible { opacity: 1; }
+
+    .info-panel {
+      position: fixed;
+      top: 0;
+      right: -420px;
+      width: 400px;
+      height: 100%;
+      background: var(--card);
+      backdrop-filter: blur(20px);
+      border-left: 1px solid var(--border);
+      z-index: 200;
+      transition: right 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow-y: auto;
+    }
+
+    .info-panel.active { right: 0; }
+
+    .info-panel-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 199;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .info-panel-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .control-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      margin-bottom: 6px;
+    }
+
+    .control-item:hover { background: rgba(var(--accent-rgb), 0.05); }
+
+    .control-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: 0 0 8px currentColor;
+    }
+
+    .mode-selector {
+      display: flex;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      padding: 4px;
+      margin-bottom: 16px;
+    }
+
+    [data-theme="light"] .mode-selector { background: rgba(0, 0, 0, 0.05); }
+
+    .mode-btn {
+      flex: 1;
+      text-align: center;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      color: var(--muted);
+    }
+
+    .mode-btn.active {
+      background: var(--accent);
+      color: var(--bg);
+      font-weight: 600;
+      box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.3);
+    }
+
+    .mini-view-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(3, 7, 18, 0.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      cursor: pointer;
+      z-index: 10;
+    }
+
+    [data-theme="light"] .mini-view-overlay {
+      background: rgba(248, 250, 252, 0.8);
+    }
+
+    .chart-container-wrapper:hover .mini-view-overlay { opacity: 1; }
+
+    .sankey-link {
+      fill: none;
+      stroke-opacity: 0.4;
+      transition: stroke-opacity 0.2s ease;
+    }
+
+    .sankey-link:hover { stroke-opacity: 0.8; }
+
+    .sankey-node rect {
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+
+    .sankey-node text {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 10px;
+      font-weight: 500;
+      fill: var(--fg);
+      pointer-events: none;
+    }
+
+    .fs-ui-element {
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+
+    .fs-ui-hidden .fs-ui-element {
+      opacity: 0;
+      transform: translateX(-20px);
+      pointer-events: none;
+    }
+
+    .fs-ui-hidden .fs-stats-element {
+      transform: translateX(20px);
+    }
+
+    .evidence-box {
+      background: rgba(var(--accent-rgb), 0.05);
+      border-left: 3px solid var(--accent);
+      padding: 12px;
+      border-radius: 0 8px 8px 0;
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--fg);
+    }
+
+    .evidence-box p {
+      margin-bottom: 4px;
+      opacity: 0.8;
+    }
+
+    .evidence-box .confidence {
+      font-weight: bold;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-animated"></div>
+  <div class="bg-grid"></div>
+
+  <div id="main-content" class="relative z-10">
+    <header class="border-b border-[--border]">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-[--accent] flex items-center justify-center">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="2"><path d="M10 2v7.31"></path><path d="M14 9.3V1.99"></path><path d="M8.5 2h7"></path><path d="M14 9.3a6.5 6.5 0 1 1-4 0"></path></svg>
+            </div>
+            <div>
+              <h1 class="text-xl font-bold tracking-tight">PharmaViz</h1>
+              <p class="text-xs text-[--muted] mono">Live Extraction Analysis</p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+              <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+              <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            </button>
+            <div class="hidden sm:flex items-center gap-2 text-sm text-[--muted]">
+              <div class="w-2 h-2 rounded-full bg-[--accent] animate-pulse"></div>
+              <span class="mono">API Connected</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="glass-card rounded-xl p-4 animate-fade-in-up stagger-1">
+          <p class="text-xs text-[--muted] uppercase tracking-wider mb-1">Chemicals</p>
+          <p class="text-3xl font-bold text-[--accent]" id="totalDrugs">0</p>
+        </div>
+        <div class="glass-card rounded-xl p-4 animate-fade-in-up stagger-2">
+          <p class="text-xs text-[--muted] uppercase tracking-wider mb-1">Adverse Effects</p>
+          <p class="text-3xl font-bold text-[--accent-secondary]" id="totalEffects">0</p>
+        </div>
+        <div class="glass-card rounded-xl p-4 animate-fade-in-up stagger-3">
+          <p class="text-xs text-[--muted] uppercase tracking-wider mb-1">Relations</p>
+          <p class="text-3xl font-bold text-[--fg]" id="totalConnections">0</p>
+        </div>
+        <div class="glass-card rounded-xl p-4 animate-fade-in-up stagger-3">
+          <p class="text-xs text-[--muted] uppercase tracking-wider mb-1">Avg. Conf</p>
+          <p class="text-3xl font-bold text-[--accent]" id="avgConf">0%</p>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-4 gap-6">
+        <div class="lg:col-span-1 space-y-6">
+          <div class="glass-card rounded-2xl p-6 animate-fade-in-up stagger-2">
+            <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-[--accent]"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              Extraction
+            </h2>
+
+            <input id="pdfInput" type="file" accept="application/pdf"
+              class="w-full mb-3 text-sm text-[--muted] file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[--accent]/20 file:text-[--accent] file:font-medium">
+
+            <button id="processBtn" class="btn-primary w-full py-3 rounded-xl text-sm font-semibold">Proses PDF</button>
+
+            <button id="openFullscreenBtn" class="w-full mt-3 py-3 rounded-xl text-sm font-medium border border-[--accent] text-[--accent] hover:bg-[--accent]/10 transition-colors flex items-center justify-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+              Fullscreen View
+            </button>
+          </div>
+
+          <div class="glass-card rounded-2xl p-6 animate-fade-in-up stagger-3">
+            <h3 class="text-sm font-semibold mb-3 uppercase tracking-wider text-[--muted]">Side Effect Severity</h3>
+            <div>
+              <div class="control-item" data-type="drug"><div class="control-dot" style="background: var(--color-drug); color: var(--color-drug);"></div><span class="text-sm">Drug</span></div>
+              <div class="control-item" data-type="mild"><div class="control-dot" style="background: var(--color-mild); color: var(--color-mild);"></div><span class="text-sm">Mild</span></div>
+              <div class="control-item" data-type="moderate"><div class="control-dot" style="background: var(--color-moderate); color: var(--color-moderate);"></div><span class="text-sm">Moderate</span></div>
+              <div class="control-item" data-type="severe"><div class="control-dot" style="background: var(--color-severe); color: var(--color-severe);"></div><span class="text-sm">Severe</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lg:col-span-3">
+          <div class="chart-container-wrapper glass-card rounded-2xl p-6 animate-fade-in-up stagger-3 relative" style="min-height: 500px;">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-lg font-semibold">Extraction Results</h2>
+              <div class="text-xs mono text-[--muted]"><span id="nodeCount">0</span> nodes | <span id="linkCount">0</span> links</div>
+            </div>
+            <div id="chart-container" class="relative bg-[--bg]/50 rounded-xl overflow-hidden" style="height: 420px;">
+              <div id="mini-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-[--muted] z-20">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8" class="mb-3 opacity-30"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                <p class="text-sm">Pilih PDF dan klik Proses PDF</p>
+              </div>
+            </div>
+            <div id="mini-view-overlay" class="mini-view-overlay rounded-xl">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" class="mb-2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+              <span class="text-[--accent] font-semibold">Open Fullscreen</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="fullscreen-container" class="fullscreen-container">
+    <div class="p-4 border-b border-[--border] bg-[--card]/80 backdrop-blur-sm z-10">
+      <div class="flex items-center justify-between max-w-7xl mx-auto">
+        <div class="flex items-center gap-4">
+          <h1 class="text-xl font-bold">Visualization Studio</h1>
+          <span class="text-xs text-[--muted] mono px-2 py-1 rounded bg-[--border]">Live Mode</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="toggleUIBtn" class="btn-icon px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="eye-icon"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="eye-off-icon" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+            <span class="btn-text">Hide UI</span>
+          </button>
+          <button id="refreshBtn" class="btn-icon px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 16h5v5"></path></svg>
+            Refresh
+          </button>
+          <button id="closeFullscreenBtn" class="btn-icon px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="fullscreen-chart" class="flex-1 relative">
+      <div id="fs-loading-overlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p class="mt-3 text-sm text-[--muted]">Processing graph...</p>
+      </div>
+
+      <div id="fs-controls-panel" class="fs-ui-element absolute bottom-6 left-6 z-20 w-64">
+        <div class="glass-card rounded-xl p-4">
+          <div class="mode-selector">
+            <div class="mode-btn active" data-mode="network">Network</div>
+            <div class="mode-btn" data-mode="sankey">Flow</div>
+          </div>
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-[--muted] mb-3">Filter Nodes</h4>
+          <div>
+            <div class="control-item" data-type="drug" data-fs="true"><div class="control-dot" style="background: var(--color-drug); color: var(--color-drug);"></div><span class="text-sm">Drug</span></div>
+            <div class="control-item" data-type="mild" data-fs="true"><div class="control-dot" style="background: var(--color-mild); color: var(--color-mild);"></div><span class="text-sm">Mild</span></div>
+            <div class="control-item" data-type="moderate" data-fs="true"><div class="control-dot" style="background: var(--color-moderate); color: var(--color-moderate);"></div><span class="text-sm">Moderate</span></div>
+            <div class="control-item" data-type="severe" data-fs="true"><div class="control-dot" style="background: var(--color-severe); color: var(--color-severe);"></div><span class="text-sm">Severe</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="fs-stats-panel" class="fs-ui-element fs-stats-element absolute top-6 right-6 z-20 flex gap-3">
+        <div class="glass-card rounded-lg px-4 py-3 text-center">
+          <p class="text-2xl font-bold text-[--accent]" id="fsTotalDrugs">0</p>
+          <p class="text-xs text-[--muted]">Drugs</p>
+        </div>
+        <div class="glass-card rounded-lg px-4 py-3 text-center">
+          <p class="text-2xl font-bold text-[--accent-secondary]" id="fsTotalEffects">0</p>
+          <p class="text-xs text-[--muted]">Effects</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="info-panel-overlay" class="info-panel-overlay"></div>
+  <div id="info-panel" class="info-panel">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="text-lg font-bold" id="info-title">Detail</h3>
+        <button id="closeInfoBtn" class="p-2 rounded-lg hover:bg-[--border] transition-colors">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <div id="info-content"></div>
+    </div>
+  </div>
+
+  <div id="tooltip" class="tooltip"></div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+
+    let drugData = { nodes: [], links: [] };
+    let currentDocId = null;
+
+    const themeToggle = document.getElementById("themeToggle");
+    let activeFilters = new Set(["drug", "mild", "moderate", "severe"]);
+    let simulations = { mini: null, full: null };
+    let isFullscreenActive = false;
+    let currentVizMode = "network";
+    let isUIMinimized = false;
+
+    function getTheme() {
+      return document.documentElement.getAttribute("data-theme");
+    }
+
+    function setTheme(theme) {
+      document.documentElement.setAttribute("data-theme", theme);
+      localStorage.setItem("theme", theme);
+    }
+
+    setTheme(localStorage.getItem("theme") || "dark");
+
+    themeToggle.addEventListener("click", () => {
+      setTheme(getTheme() === "dark" ? "light" : "dark");
+      renderActiveChart();
+    });
+
+    function getSeverity(diseaseName) {
+      const severeKeywords = ["damage", "bleeding", "acidosis", "failure", "severe"];
+      const moderateKeywords = ["rash", "pain", "vomiting"];
+      const name = (diseaseName || "").toLowerCase();
+      if (severeKeywords.some(k => name.includes(k))) return "severe";
+      if (moderateKeywords.some(k => name.includes(k))) return "moderate";
+      return "mild";
+    }
+
+    function toTitleCase(str) {
+      return (str || "").replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+    }
+
+    function getCSSVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function getColorScale() {
+      return d3.scaleOrdinal()
+        .domain([1, 2, 3, 4])
+        .range([
+          getCSSVar("--color-drug"),
+          getCSSVar("--color-mild"),
+          getCSSVar("--color-moderate"),
+          getCSSVar("--color-severe")
+        ]);
+    }
+
+    async function apiFetch(path, options = {}) {
+      const res = await fetch(API_BASE + path, options);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data.detail || ("HTTP " + res.status);
+        throw new Error(msg);
+      }
+      return data;
+    }
+
+    async function uploadPDF(file) {
+      const formData = new FormData();
+      formData.append("file", file);
+      return apiFetch("/upload", { method: "POST", body: formData });
+    }
+
+    async function fetchGraph(docId) {
+      return apiFetch("/graph/" + docId);
+    }
+
+    async function fetchRelations(docId) {
+      return apiFetch("/relations/" + docId);
+    }
+
+    function buildEvidenceMap(relations) {
+      const map = new Map();
+      for (const r of relations) {
+        const chem = toTitleCase(r.chemical || "");
+        const dis = toTitleCase(r.disease || "");
+        const key = chem + "||" + dis;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push({
+          sentence: r.sentence || "",
+          confidence: Number(r.confidence || 0)
+        });
+      }
+      for (const entry of map.entries()) {
+        const key = entry[0];
+        const arr = entry[1];
+        arr.sort((a, b) => b.confidence - a.confidence);
+        map.set(key, arr.slice(0, 5));
+      }
+      return map;
+    }
+
+    function transformApiData(graphData, relationsData) {
+      const nodeMap = new Map();
+      const links = [];
+      const evidenceMap = buildEvidenceMap(relationsData || []);
+
+      for (const n of graphData.nodes || []) {
+        const id = toTitleCase(n.id);
+        if (n.type === "drug") {
+          nodeMap.set(id, {
+            id: id,
+            group: 1,
+            type: "drug",
+            description: "Drug entity extracted from document."
+          });
+        } else {
+          const severity = getSeverity(id);
+          let group = 2;
+          if (severity === "moderate") group = 3;
+          if (severity === "severe") group = 4;
+
+          nodeMap.set(id, {
+            id: id,
+            group: group,
+            type: severity,
+            severity: severity,
+            description: "Adverse effect: " + id
+          });
+        }
+      }
+
+      for (const l of graphData.links || []) {
+        const source = toTitleCase(l.source);
+        const target = toTitleCase(l.target);
+        const conf = Number(l.confidence || 0);
+        const count = Number(l.value || 1);
+        const key = source + "||" + target;
+        const evidences = evidenceMap.get(key) || [];
+
+        links.push({
+          source: source,
+          target: target,
+          value: Math.max(1, count),
+          confidence: conf,
+          sentence: evidences[0] ? evidences[0].sentence : "",
+          evidences: evidences
+        });
+      }
+
+      return {
+        doc_id: graphData.doc_id,
+        nodes: Array.from(nodeMap.values()),
+        links: links
+      };
+    }
+
+    function setLoadingState(isLoading, label) {
+      const btn = document.getElementById("processBtn");
+      if (btn) {
+        btn.disabled = isLoading;
+        btn.textContent = isLoading ? (label || "Processing...") : "Proses PDF";
+      }
+
+      const miniPlaceholder = document.getElementById("mini-placeholder");
+      if (miniPlaceholder && isLoading) {
+        miniPlaceholder.style.display = "flex";
+        miniPlaceholder.innerHTML = '<p class="text-sm">Memproses dokumen...</p>';
+      }
+    }
+
+    function showError(message) {
+      const miniPlaceholder = document.getElementById("mini-placeholder");
+      if (miniPlaceholder) {
+        miniPlaceholder.style.display = "flex";
+        miniPlaceholder.innerHTML = '<p class="text-sm text-red-400">' + message + "</p>";
+      }
+    }
+
+    function animateCounter(id, target) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      let current = parseInt(el.textContent, 10) || 0;
+      const step = (target - current) / 20;
+      const timer = setInterval(() => {
+        current += step;
+        if ((step > 0 && current >= target) || (step < 0 && current <= target)) {
+          el.textContent = String(target);
+          clearInterval(timer);
+        } else {
+          el.textContent = String(Math.round(current));
+        }
+      }, 20);
+    }
+
+    function updateStats() {
+      if (!drugData.nodes.length) return;
+      const drugs = drugData.nodes.filter(n => n.type === "drug").length;
+      const effects = drugData.nodes.filter(n => n.type !== "drug").length;
+      const linksCount = drugData.links.length;
+      const avg = linksCount > 0
+        ? Math.round((drugData.links.reduce((s, l) => s + Number(l.confidence || 0), 0) / linksCount) * 100)
+        : 0;
+
+      animateCounter("totalDrugs", drugs);
+      animateCounter("totalEffects", effects);
+      animateCounter("totalConnections", linksCount);
+      animateCounter("fsTotalDrugs", drugs);
+      animateCounter("fsTotalEffects", effects);
+
+      const avgEl = document.getElementById("avgConf");
+      if (avgEl) avgEl.textContent = avg + "%";
+    }
+
+    function renderActiveChart() {
+      if (!drugData.nodes.length) return;
+
+      const container = document.getElementById("chart-container");
+      if (simulations.mini) simulations.mini.stop();
+      createNetworkChart("chart-container", container.clientWidth, container.clientHeight, true);
+
+      if (isFullscreenActive) {
+        if (currentVizMode === "sankey") {
+          createSankeyChart("fullscreen-chart", window.innerWidth, window.innerHeight - 70);
+        } else {
+          createNetworkChart("fullscreen-chart", window.innerWidth, window.innerHeight - 70, false);
+        }
+      }
+    }
+
+    function createNetworkChart(containerId, width, height, isMini) {
+      const container = document.getElementById(containerId);
+      if (!container) return null;
+
+      const key = isMini ? "mini" : "full";
+      if (simulations[key]) simulations[key].stop();
+      d3.select("#" + containerId + " svg").remove();
+
+      const filteredNodes = drugData.nodes.filter(n => activeFilters.has(n.type));
+      const nodeIds = new Set(filteredNodes.map(n => n.id));
+      const filteredLinks = drugData.links.filter(l => nodeIds.has(l.source.id || l.source) && nodeIds.has(l.target.id || l.target));
+
+      const nodes = filteredNodes.map(d => ({ ...d }));
+      const links = filteredLinks.map(d => ({ ...d }));
+
+      const nc = document.getElementById("nodeCount");
+      const lc = document.getElementById("linkCount");
+      if (nc) nc.textContent = String(nodes.length);
+      if (lc) lc.textContent = String(links.length);
+
+      const colorScale = getColorScale();
+      const linkColor = getCSSVar("--link-color");
+      const nodeStroke = getCSSVar("--node-stroke");
+
+      const svg = d3.select("#" + containerId)
+        .append("svg")
+        .attr("class", "chart-svg")
+        .attr("viewBox", [-width / 2, -height / 2, width, height]);
+
+      const sim = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(d => 80 + (d.value || 1) * 5))
+        .force("charge", d3.forceManyBody().strength(isMini ? -150 : -250))
+        .force("x", d3.forceX().strength(0.05))
+        .force("y", d3.forceY().strength(0.05))
+        .force("collision", d3.forceCollide().radius(isMini ? 20 : 35));
+
+      simulations[key] = sim;
+
+      const link = svg.append("g").selectAll("line").data(links).join("line")
+        .attr("stroke", d => {
+          const t = d.target.type || filteredNodes.find(n => n.id === (d.target.id || d.target))?.type;
+          if (t === "severe") return colorScale(4);
+          if (t === "moderate") return colorScale(3);
+          return linkColor;
+        })
+        .attr("stroke-width", d => Math.sqrt(d.value || 1) * (isMini ? 1.5 : 2))
+        .attr("stroke-opacity", 0.5);
+
+      const node = svg.append("g").selectAll("g").data(nodes).join("g")
+        .attr("cursor", "pointer")
+        .call(d3.drag()
+          .on("start", e => {
+            if (!e.active) sim.alphaTarget(0.3).restart();
+            e.subject.fx = e.subject.x;
+            e.subject.fy = e.subject.y;
+          })
+          .on("drag", e => {
+            e.subject.fx = e.x;
+            e.subject.fy = e.y;
+          })
+          .on("end", e => {
+            if (!e.active) sim.alphaTarget(0);
+            e.subject.fx = null;
+            e.subject.fy = null;
+          })
+        );
+
+      if (!isMini) {
+        node.append("circle")
+          .attr("r", d => d.type === "drug" ? 24 : 16)
+          .attr("fill", "none")
+          .attr("stroke", d => colorScale(d.group))
+          .attr("stroke-width", 1.5)
+          .attr("stroke-opacity", 0.3);
+      }
+
+      node.append("circle")
+        .attr("r", isMini ? 8 : (d => d.type === "drug" ? 16 : 10))
+        .attr("fill", d => colorScale(d.group))
+        .attr("stroke", nodeStroke)
+        .attr("stroke-width", 2)
+        .on("mouseover", (e, d) => {
+          showTooltip(e, d, "network");
+          highlightConnections(true, d, node, link);
+        })
+        .on("mousemove", moveTooltip)
+        .on("mouseout", (e, d) => {
+          hideTooltip();
+          highlightConnections(false, d, node, link);
+        })
+        .on("click", (e, d) => showInfoPanel(d));
+
+      if (!isMini) {
+        node.append("text")
+          .attr("class", "node-label")
+          .attr("dy", d => d.type === "drug" ? 30 : 22)
+          .attr("text-anchor", "middle")
+          .attr("font-size", "12px")
+          .attr("font-weight", d => d.type === "drug" ? "600" : "400")
+          .text(d => d.id.length > 12 ? d.id.substring(0, 10) + ".." : d.id);
+      }
+
+      sim.on("tick", () => {
+        link
+          .attr("x1", d => d.source.x)
+          .attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x)
+          .attr("y2", d => d.target.y);
+        node.attr("transform", d => "translate(" + d.x + "," + d.y + ")");
+      });
+
+      return sim;
+    }
+
+    function highlightConnections(isHover, d, node, link) {
+      if (!isHover) {
+        link.attr("stroke-opacity", 0.5).attr("stroke-width", l => Math.sqrt(l.value || 1) * 2);
+        node.attr("opacity", 1);
+        return;
+      }
+
+      const connectedIds = new Set();
+      drugData.links
+        .filter(l => (l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id)
+        .forEach(l => {
+          connectedIds.add(l.source.id || l.source);
+          connectedIds.add(l.target.id || l.target);
+        });
+
+      link
+        .attr("stroke-opacity", l => ((l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id) ? 0.8 : 0.1)
+        .attr("stroke-width", l => ((l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id) ? Math.sqrt(l.value || 1) * 3 : Math.sqrt(l.value || 1) * 2);
+
+      node.attr("opacity", n => connectedIds.has(n.id) || n.id === d.id ? 1 : 0.2);
+    }
+
+    function createSankeyChart(containerId, width, height) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      d3.select("#" + containerId + " svg").remove();
+
+      const colorScale = getColorScale();
+      const nodeStroke = getCSSVar("--node-stroke");
+
+      const margin = { top: 20, right: 140, bottom: 20, left: 140 };
+      const filteredNodes = drugData.nodes.filter(n => activeFilters.has(n.type));
+      const nodeIds = new Set(filteredNodes.map(n => n.id));
+
+      const sankeyData = {
+        nodes: filteredNodes.map(n => ({ name: n.id, category: n.group, original: n })),
+        links: drugData.links
+          .filter(l => nodeIds.has(l.source.id || l.source) && nodeIds.has(l.target.id || l.target))
+          .map(l => ({
+            source: l.source.id || l.source,
+            target: l.target.id || l.target,
+            value: l.value,
+            confidence: l.confidence,
+            sentence: l.sentence
+          }))
+      };
+
+      const sankey = d3.sankey()
+        .nodeId(d => d.name)
+        .nodeWidth(16)
+        .nodePadding(12)
+        .nodeAlign(d3.sankeyLeft)
+        .extent([[margin.left, margin.top], [width - margin.right, height - margin.bottom]]);
+
+      const result = sankey(sankeyData);
+      const nodes = result.nodes;
+      const links = result.links;
+
+      const svg = d3.select("#" + containerId)
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("viewBox", [0, 0, width, height]);
+
+      const defs = svg.append("defs");
+
+      links.forEach((lk, i) => {
+        const gradient = defs.append("linearGradient")
+          .attr("id", "link-gradient-" + i)
+          .attr("gradientUnits", "userSpaceOnUse")
+          .attr("x1", lk.source.x1)
+          .attr("x2", lk.target.x0);
+
+        gradient.append("stop")
+          .attr("offset", "0%")
+          .attr("stop-color", colorScale(lk.source.category))
+          .attr("stop-opacity", 0.7);
+
+        gradient.append("stop")
+          .attr("offset", "100%")
+          .attr("stop-color", colorScale(lk.target.category))
+          .attr("stop-opacity", 0.7);
+      });
+
+      svg.append("g")
+        .attr("fill", "none")
+        .selectAll("path")
+        .data(links)
+        .join("path")
+        .attr("d", d3.sankeyLinkHorizontal())
+        .attr("stroke", (d, i) => "url(#link-gradient-" + i + ")")
+        .attr("stroke-width", d => Math.max(1, d.width))
+        .attr("stroke-opacity", 0.35)
+        .on("mouseover", function(event, d) {
+          d3.select(this).attr("stroke-opacity", 0.8).raise();
+          showTooltip(event, {
+            id: d.source.name + " -> " + d.target.name,
+            value: d.confidence,
+            sentence: d.sentence
+          }, "sankey");
+        })
+        .on("mousemove", moveTooltip)
+        .on("mouseout", function() {
+          d3.select(this).attr("stroke-opacity", 0.35);
+          hideTooltip();
+        });
+
+      const nodeG = svg.append("g").attr("class", "sankey-node").selectAll("g").data(nodes).join("g");
+
+      nodeG.append("rect")
+        .attr("x", d => d.x0)
+        .attr("y", d => d.y0)
+        .attr("height", d => d.y1 - d.y0)
+        .attr("width", d => d.x1 - d.x0)
+        .attr("fill", d => colorScale(d.category))
+        .attr("stroke", nodeStroke)
+        .attr("stroke-width", 1.5)
+        .attr("rx", 2)
+        .on("click", (e, d) => showInfoPanel(d.original));
+
+      nodeG.append("text")
+        .attr("x", d => d.x0 < width / 2 ? d.x0 - 8 : d.x1 + 8)
+        .attr("y", d => (d.y1 + d.y0) / 2)
+        .attr("dy", "0.35em")
+        .attr("text-anchor", d => d.x0 < width / 2 ? "end" : "start")
+        .text(d => d.name);
+
+      document.getElementById("nodeCount").textContent = String(nodes.length);
+      document.getElementById("linkCount").textContent = String(links.length);
+    }
+
+    function showTooltip(event, d, type) {
+      const tooltip = document.getElementById("tooltip");
+      const colorScale = getColorScale();
+      let html = "";
+
+      if (type === "sankey") {
+        html += '<strong style="color:var(--fg)">' + (d.id || "-") + "</strong>";
+        html += '<br><span style="color:var(--accent)">Confidence: ' + (Number(d.value || 0) * 100).toFixed(0) + "%</span>";
+        if (d.sentence) {
+          html += '<p style="color:var(--muted);margin-top:4px;font-size:11px">"' + d.sentence + '"</p>';
+        }
+      } else {
+        html += '<strong style="color:' + colorScale(d.group) + '">' + d.id + "</strong>";
+        if (d.type !== "drug") {
+          html += '<br><span style="color:var(--muted);font-size:11px">Severity: ' + d.severity + "</span>";
+        }
+      }
+
+      tooltip.innerHTML = html;
+      tooltip.classList.add("visible");
+    }
+
+    function moveTooltip(event) {
+      const tooltip = document.getElementById("tooltip");
+      tooltip.style.left = (event.clientX + 15) + "px";
+      tooltip.style.top = (event.clientY - 10) + "px";
+    }
+
+    function hideTooltip() {
+      document.getElementById("tooltip").classList.remove("visible");
+    }
+
+    function showInfoPanel(d) {
+      const colorScale = getColorScale();
+      document.getElementById("info-title").innerHTML = '<span style="color:' + colorScale(d.group) + '">' + d.id + "</span>";
+
+      let html = '<p class="text-[--muted] mb-4">' + (d.description || "") + "</p>";
+      const relations = drugData.links.filter(l => (l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id);
+
+      if (d.type === "drug") {
+        html += '<h4 class="text-sm font-semibold mb-2 text-[--muted]">Extracted Relations (' + relations.length + ")</h4>";
+        html += '<div class="space-y-3">';
+        relations.forEach(rel => {
+          const target = drugData.nodes.find(n => n.id === (rel.target.id || rel.target));
+          html += '<div class="p-3 rounded-lg bg-[--bg-secondary] border border-[--border]">';
+          html += '<div class="flex justify-between items-center mb-1">';
+          html += '<span class="font-semibold" style="color:' + colorScale(target ? target.group : 2) + '">' + (target ? target.id : "-") + "</span>";
+          html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + (Number(rel.confidence || 0) * 100).toFixed(0) + "%</span>";
+          html += "</div>";
+          html += '<div class="evidence-box" style="font-size:12px">"' + (rel.sentence || "-") + '"</div>';
+          html += "</div>";
+        });
+        html += "</div>";
+      } else {
+        const drugs = drugData.links.filter(l => (l.target.id || l.target) === d.id);
+        html += '<h4 class="text-sm font-semibold mb-2 text-[--muted]">Caused by (' + drugs.length + " drugs)</h4>";
+        html += '<div class="space-y-2">';
+        drugs.forEach(lk => {
+          const source = drugData.nodes.find(n => n.id === (lk.source.id || lk.source));
+          html += '<div class="p-3 rounded-lg bg-[--bg-secondary] border border-[--border]">';
+          html += '<div class="flex justify-between items-center mb-1">';
+          html += '<span style="color:' + colorScale(1) + '">' + (source ? source.id : "-") + "</span>";
+          html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + (Number(lk.confidence || 0) * 100).toFixed(0) + "%</span>";
+          html += "</div>";
+          html += '<div class="evidence-box" style="font-size:12px">"' + (lk.sentence || "-") + '"</div>';
+          html += "</div>";
+        });
+        html += "</div>";
+      }
+
+      document.getElementById("info-content").innerHTML = html;
+      document.getElementById("info-panel").classList.add("active");
+      document.getElementById("info-panel-overlay").classList.add("active");
+    }
+
+    function closeInfoPanel() {
+      document.getElementById("info-panel").classList.remove("active");
+      document.getElementById("info-panel-overlay").classList.remove("active");
+    }
+
+    async function runPipelineFromFile(file) {
+      if (!file) {
+        showError("Pilih file PDF dulu.");
+        return;
+      }
+
+      try {
+        setLoadingState(true, "Uploading...");
+        const upload = await uploadPDF(file);
+        currentDocId = upload.doc_id;
+
+        setLoadingState(true, "Loading graph...");
+        const result = await Promise.all([
+          fetchGraph(currentDocId),
+          fetchRelations(currentDocId)
+        ]);
+        const graph = result[0];
+        const relations = result[1];
+
+        drugData = transformApiData(graph, relations);
+
+        document.getElementById("mini-placeholder").style.display = "none";
+        renderActiveChart();
+        updateStats();
+        setLoadingState(false);
+      } catch (err) {
+        setLoadingState(false);
+        showError("Gagal: " + err.message);
+      }
+    }
+
+    document.getElementById("processBtn").addEventListener("click", async () => {
+      const fileInput = document.getElementById("pdfInput");
+      const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+      await runPipelineFromFile(file);
+    });
+
+    document.getElementById("pdfInput").addEventListener("change", async e => {
+      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+      if (file) await runPipelineFromFile(file);
+    });
+
+    document.getElementById("openFullscreenBtn").addEventListener("click", () => {
+      isFullscreenActive = true;
+      document.getElementById("fullscreen-container").classList.add("active");
+      document.getElementById("fs-loading-overlay").classList.remove("hidden");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          renderActiveChart();
+          document.getElementById("fs-loading-overlay").classList.add("hidden");
+        });
+      });
+    });
+
+    document.getElementById("mini-view-overlay").addEventListener("click", () => {
+      document.getElementById("openFullscreenBtn").click();
+    });
+
+    document.getElementById("closeFullscreenBtn").addEventListener("click", () => {
+      isFullscreenActive = false;
+      document.getElementById("fullscreen-container").classList.remove("active");
+      if (simulations.full) simulations.full.stop();
+    });
+
+    document.getElementById("refreshBtn").addEventListener("click", renderActiveChart);
+
+    document.getElementById("toggleUIBtn").addEventListener("click", () => {
+      const chartContainer = document.getElementById("fullscreen-chart");
+      const btnText = document.querySelector("#toggleUIBtn .btn-text");
+      const eyeIcon = document.querySelector("#toggleUIBtn .eye-icon");
+      const eyeOffIcon = document.querySelector("#toggleUIBtn .eye-off-icon");
+
+      isUIMinimized = !isUIMinimized;
+      if (isUIMinimized) {
+        chartContainer.classList.add("fs-ui-hidden");
+        btnText.textContent = "Show UI";
+        eyeIcon.style.display = "none";
+        eyeOffIcon.style.display = "block";
+      } else {
+        chartContainer.classList.remove("fs-ui-hidden");
+        btnText.textContent = "Hide UI";
+        eyeIcon.style.display = "block";
+        eyeOffIcon.style.display = "none";
+      }
+    });
+
+    document.querySelectorAll(".control-item").forEach(item => {
+      item.addEventListener("click", () => {
+        const type = item.dataset.type;
+        if (activeFilters.has(type)) {
+          activeFilters.delete(type);
+          document.querySelectorAll('.control-item[data-type="' + type + '"]').forEach(i => i.style.opacity = "0.3");
+        } else {
+          activeFilters.add(type);
+          document.querySelectorAll('.control-item[data-type="' + type + '"]').forEach(i => i.style.opacity = "1");
+        }
+        renderActiveChart();
+      });
+    });
+
+    document.querySelectorAll(".mode-btn").forEach(btn => {
+      btn.addEventListener("click", function() {
+        document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+        this.classList.add("active");
+        currentVizMode = this.dataset.mode;
+        renderActiveChart();
+      });
+    });
+
+    document.getElementById("closeInfoBtn").addEventListener("click", closeInfoPanel);
+    document.getElementById("info-panel-overlay").addEventListener("click", closeInfoPanel);
+
+    window.addEventListener("resize", () => {
+      if (isFullscreenActive) renderActiveChart();
+    });
+
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") {
+        if (document.getElementById("info-panel").classList.contains("active")) {
+          closeInfoPanel();
+        } else if (isFullscreenActive) {
+          document.getElementById("closeFullscreenBtn").click();
+        }
+      }
+    });
+  </script>
+</body>
+</html>

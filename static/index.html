@@ -449,10 +449,11 @@
               Extraction
             </h2>
 
-            <input id="pdfInput" type="file" accept="application/pdf"
+            <input id="pdfInput" type="file" accept="application/pdf" multiple
               class="w-full mb-3 text-sm text-[--muted] file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[--accent]/20 file:text-[--accent] file:font-medium">
+            <p class="text-xs text-[--muted] mb-3">Maksimal 5 file PDF per upload.</p>
 
-            <button id="processBtn" class="btn-primary w-full py-3 rounded-xl text-sm font-semibold">Proses PDF</button>
+            <button id="processBtn" class="btn-primary w-full py-3 rounded-xl text-sm font-semibold">Proses PDF (max 5)</button>
 
             <button id="openFullscreenBtn" class="w-full mt-3 py-3 rounded-xl text-sm font-medium border border-[--accent] text-[--accent] hover:bg-[--accent]/10 transition-colors flex items-center justify-center gap-2">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
@@ -461,12 +462,10 @@
           </div>
 
           <div class="glass-card rounded-2xl p-6 animate-fade-in-up stagger-3">
-            <h3 class="text-sm font-semibold mb-3 uppercase tracking-wider text-[--muted]">Side Effect Severity</h3>
+            <h3 class="text-sm font-semibold mb-3 uppercase tracking-wider text-[--muted]">Node Type</h3>
             <div>
               <div class="control-item" data-type="drug"><div class="control-dot" style="background: var(--color-drug); color: var(--color-drug);"></div><span class="text-sm">Drug</span></div>
-              <div class="control-item" data-type="mild"><div class="control-dot" style="background: var(--color-mild); color: var(--color-mild);"></div><span class="text-sm">Mild</span></div>
-              <div class="control-item" data-type="moderate"><div class="control-dot" style="background: var(--color-moderate); color: var(--color-moderate);"></div><span class="text-sm">Moderate</span></div>
-              <div class="control-item" data-type="severe"><div class="control-dot" style="background: var(--color-severe); color: var(--color-severe);"></div><span class="text-sm">Severe</span></div>
+              <div class="control-item" data-type="side_effect"><div class="control-dot" style="background: var(--accent-secondary); color: var(--accent-secondary);"></div><span class="text-sm">Side Effect</span></div>
             </div>
           </div>
         </div>
@@ -529,13 +528,12 @@
           <div class="mode-selector">
             <div class="mode-btn active" data-mode="network">Network</div>
             <div class="mode-btn" data-mode="sankey">Flow</div>
+            <div class="mode-btn" data-mode="chord">Chord</div>
           </div>
           <h4 class="text-xs font-semibold uppercase tracking-wider text-[--muted] mb-3">Filter Nodes</h4>
           <div>
             <div class="control-item" data-type="drug" data-fs="true"><div class="control-dot" style="background: var(--color-drug); color: var(--color-drug);"></div><span class="text-sm">Drug</span></div>
-            <div class="control-item" data-type="mild" data-fs="true"><div class="control-dot" style="background: var(--color-mild); color: var(--color-mild);"></div><span class="text-sm">Mild</span></div>
-            <div class="control-item" data-type="moderate" data-fs="true"><div class="control-dot" style="background: var(--color-moderate); color: var(--color-moderate);"></div><span class="text-sm">Moderate</span></div>
-            <div class="control-item" data-type="severe" data-fs="true"><div class="control-dot" style="background: var(--color-severe); color: var(--color-severe);"></div><span class="text-sm">Severe</span></div>
+            <div class="control-item" data-type="side_effect" data-fs="true"><div class="control-dot" style="background: var(--accent-secondary); color: var(--accent-secondary);"></div><span class="text-sm">Side Effect</span></div>
           </div>
         </div>
       </div>
@@ -575,7 +573,7 @@
     let currentDocId = null;
 
     const themeToggle = document.getElementById("themeToggle");
-    let activeFilters = new Set(["drug", "mild", "moderate", "severe"]);
+    let activeFilters = new Set(["drug", "side_effect"]);
     let simulations = { mini: null, full: null };
     let isFullscreenActive = false;
     let currentVizMode = "network";
@@ -616,12 +614,10 @@
 
     function getColorScale() {
       return d3.scaleOrdinal()
-        .domain([1, 2, 3, 4])
+        .domain([1, 2])
         .range([
           getCSSVar("--color-drug"),
-          getCSSVar("--color-mild"),
-          getCSSVar("--color-moderate"),
-          getCSSVar("--color-severe")
+          getCSSVar("--accent-secondary")
         ]);
     }
 
@@ -635,10 +631,48 @@
       return data;
     }
 
-    async function uploadPDF(file) {
+    async function uploadPDF(files) {
       const formData = new FormData();
-      formData.append("file", file);
+      files.forEach(file => formData.append("files", file));
       return apiFetch("/upload", { method: "POST", body: formData });
+    }
+
+    function mergeGraphPayloads(graphs) {
+      const nodeMap = new Map();
+      const linkMap = new Map();
+
+      for (const graph of graphs) {
+        for (const n of graph.nodes || []) {
+          const nodeId = toTitleCase(n.id);
+          if (!nodeMap.has(nodeId)) {
+            nodeMap.set(nodeId, { id: nodeId, type: n.type });
+          }
+        }
+
+        for (const l of graph.links || []) {
+          const source = toTitleCase(l.source);
+          const target = toTitleCase(l.target);
+          const key = source + "||" + target;
+          const prev = linkMap.get(key) || { source, target, value: 0, confSum: 0, confCount: 0 };
+          prev.value += Number(l.value || 0);
+          prev.confSum += Number(l.confidence || 0);
+          prev.confCount += 1;
+          linkMap.set(key, prev);
+        }
+      }
+
+      const links = Array.from(linkMap.values()).map(v => ({
+        source: v.source,
+        target: v.target,
+        value: Math.max(1, v.value),
+        confidence: v.confCount ? (v.confSum / v.confCount) : 0,
+      }));
+
+      return {
+        doc_id: "multi",
+        nodes: Array.from(nodeMap.values()),
+        links,
+      };
     }
 
     async function fetchGraph(docId) {
@@ -658,7 +692,9 @@
         if (!map.has(key)) map.set(key, []);
         map.get(key).push({
           sentence: r.sentence || "",
-          confidence: Number(r.confidence || 0)
+          confidence: Number(r.confidence || 0),
+          filename: r.filename || "Unknown source",
+          doc_id: r.doc_id || ""
         });
       }
       for (const entry of map.entries()) {
@@ -685,17 +721,11 @@
             description: "Drug entity extracted from document."
           });
         } else {
-          const severity = getSeverity(id);
-          let group = 2;
-          if (severity === "moderate") group = 3;
-          if (severity === "severe") group = 4;
-
           nodeMap.set(id, {
             id: id,
-            group: group,
-            type: severity,
-            severity: severity,
-            description: "Adverse effect: " + id
+            group: 2,
+            type: "side_effect",
+            description: "Side effect: " + id
           });
         }
       }
@@ -707,6 +737,7 @@
         const count = Number(l.value || 1);
         const key = source + "||" + target;
         const evidences = evidenceMap.get(key) || [];
+        const sourceFiles = Array.from(new Set(evidences.map(e => e.filename).filter(Boolean)));
 
         links.push({
           source: source,
@@ -714,7 +745,8 @@
           value: Math.max(1, count),
           confidence: conf,
           sentence: evidences[0] ? evidences[0].sentence : "",
-          evidences: evidences
+          evidences: evidences,
+          sources: sourceFiles
         });
       }
 
@@ -792,10 +824,60 @@
       if (isFullscreenActive) {
         if (currentVizMode === "sankey") {
           createSankeyChart("fullscreen-chart", window.innerWidth, window.innerHeight - 70);
+        } else if (currentVizMode === "chord") {
+          createChordChart("fullscreen-chart", window.innerWidth, window.innerHeight - 70);
         } else {
           createNetworkChart("fullscreen-chart", window.innerWidth, window.innerHeight - 70, false);
         }
       }
+    }
+
+    function buildChordData() {
+      const filteredNodes = drugData.nodes.filter(n => activeFilters.has(n.type));
+      const indexById = new Map(filteredNodes.map((n, i) => [n.id, i]));
+      const size = filteredNodes.length;
+
+      const matrix = Array.from({ length: size }, () => Array.from({ length: size }, () => 0));
+      const relationMap = new Map();
+
+      const filteredLinks = drugData.links.filter(l => {
+        const sourceId = l.source.id || l.source;
+        const targetId = l.target.id || l.target;
+        return indexById.has(sourceId) && indexById.has(targetId);
+      });
+
+      filteredLinks.forEach(l => {
+        const sourceId = l.source.id || l.source;
+        const targetId = l.target.id || l.target;
+        const s = indexById.get(sourceId);
+        const t = indexById.get(targetId);
+        if (s === undefined || t === undefined) return;
+
+        const value = Math.max(1, Number(l.value || 1));
+        matrix[s][t] += value;
+
+        const key = sourceId + "||" + targetId;
+        const prev = relationMap.get(key) || {
+          source: sourceId,
+          target: targetId,
+          value: 0,
+          confSum: 0,
+          confCount: 0,
+          sentence: "",
+        };
+        prev.value += value;
+        prev.confSum += Number(l.confidence || 0);
+        prev.confCount += 1;
+        if (!prev.sentence && l.sentence) prev.sentence = l.sentence;
+        relationMap.set(key, prev);
+      });
+
+      return {
+        nodes: filteredNodes,
+        matrix,
+        relationMap,
+        linkCount: filteredLinks.length,
+      };
     }
 
     function createNetworkChart(containerId, width, height, isMini) {
@@ -839,8 +921,7 @@
       const link = svg.append("g").selectAll("line").data(links).join("line")
         .attr("stroke", d => {
           const t = d.target.type || filteredNodes.find(n => n.id === (d.target.id || d.target))?.type;
-          if (t === "severe") return colorScale(4);
-          if (t === "moderate") return colorScale(3);
+          if (t === "side_effect") return colorScale(2);
           return linkColor;
         })
         .attr("stroke-width", d => Math.sqrt(d.value || 1) * (isMini ? 1.5 : 2))
@@ -1043,6 +1124,167 @@
       document.getElementById("linkCount").textContent = String(links.length);
     }
 
+    function createChordChart(containerId, width, height) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      d3.select("#" + containerId + " svg").remove();
+
+      const chordData = buildChordData();
+      const nodes = chordData.nodes;
+      const matrix = chordData.matrix;
+      const relationMap = chordData.relationMap;
+
+      const nodeCountEl = document.getElementById("nodeCount");
+      const linkCountEl = document.getElementById("linkCount");
+      if (nodeCountEl) nodeCountEl.textContent = String(nodes.length);
+      if (linkCountEl) linkCountEl.textContent = String(chordData.linkCount);
+
+      if (nodes.length < 2 || !matrix.some(row => row.some(v => v > 0))) {
+        const svgEmpty = d3.select("#" + containerId)
+          .append("svg")
+          .attr("width", width)
+          .attr("height", height)
+          .attr("viewBox", [0, 0, width, height]);
+
+        svgEmpty.append("text")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .attr("fill", getCSSVar("--muted"))
+          .attr("font-size", 14)
+          .text("Chord membutuhkan minimal 2 node terhubung.");
+        return;
+      }
+
+      const colorScale = getColorScale();
+      const fg = getCSSVar("--fg");
+      const border = getCSSVar("--border");
+      const accent = getCSSVar("--accent");
+
+      const svg = d3.select("#" + containerId)
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("viewBox", [0, 0, width, height]);
+
+      const g = svg.append("g").attr("transform", "translate(" + (width / 2) + "," + (height / 2) + ")");
+
+      const radius = Math.min(width, height) * 0.38;
+      const outerRadius = radius;
+      const innerRadius = radius - 26;
+
+      g.append("circle")
+        .attr("r", outerRadius + 8)
+        .attr("fill", "none")
+        .attr("stroke", border)
+        .attr("stroke-width", 1);
+
+      const chordLayout = (d3.chordDirected ? d3.chordDirected() : d3.chord())
+        .padAngle(0.045)
+        .sortSubgroups(d3.descending)
+        .sortChords(d3.descending);
+
+      const chords = chordLayout(matrix);
+
+      const ribbon = d3.ribbon().radius(innerRadius);
+      const arc = d3.arc().innerRadius(innerRadius).outerRadius(outerRadius);
+
+      const ribbons = g.append("g")
+        .attr("fill-opacity", 0.78)
+        .selectAll("path")
+        .data(chords)
+        .join("path")
+        .attr("d", ribbon)
+        .attr("fill", d => colorScale(nodes[d.source.index].group))
+        .attr("stroke", d => d3.color(colorScale(nodes[d.source.index].group)).darker(0.8))
+        .attr("stroke-width", 0.7)
+        .attr("opacity", 0)
+        .on("mouseover", function(event, d) {
+          ribbons.attr("opacity", 0.08);
+          d3.select(this).attr("opacity", 0.95).raise();
+
+          const sourceName = nodes[d.source.index].id;
+          const targetName = nodes[d.target.index].id;
+          const key = sourceName + "||" + targetName;
+          const rel = relationMap.get(key);
+          const conf = rel && rel.confCount ? (rel.confSum / rel.confCount) : 0;
+          showTooltip(event, {
+            id: sourceName + " -> " + targetName,
+            value: conf,
+            sentence: rel ? rel.sentence : ""
+          }, "sankey");
+        })
+        .on("mousemove", moveTooltip)
+        .on("mouseout", () => {
+          ribbons.attr("opacity", 0.72);
+          hideTooltip();
+        });
+
+      ribbons.transition()
+        .duration(600)
+        .delay((d, i) => i * 35)
+        .attr("opacity", 0.72);
+
+      const groups = g.append("g")
+        .selectAll("g")
+        .data(chords.groups)
+        .join("g");
+
+      groups.append("path")
+        .attr("d", arc)
+        .attr("fill", d => colorScale(nodes[d.index].group))
+        .attr("stroke", accent)
+        .attr("stroke-width", 1)
+        .attr("opacity", 0)
+        .style("cursor", "pointer")
+        .on("mouseover", function(event, d) {
+          const idx = d.index;
+          ribbons
+            .attr("opacity", r => (r.source.index === idx || r.target.index === idx) ? 0.9 : 0.06)
+            .attr("stroke-width", r => (r.source.index === idx || r.target.index === idx) ? 1.2 : 0.4);
+
+          const node = nodes[idx];
+          showTooltip(event, {
+            id: node.id,
+            group: node.group,
+            type: node.type
+          }, "network");
+        })
+        .on("mousemove", moveTooltip)
+        .on("mouseout", () => {
+          ribbons.attr("opacity", 0.72).attr("stroke-width", 0.7);
+          hideTooltip();
+        })
+        .on("click", (event, d) => {
+          showInfoPanel(nodes[d.index]);
+        })
+        .transition()
+        .duration(500)
+        .delay((d, i) => i * 45)
+        .attr("opacity", 0.92);
+
+      groups.append("text")
+        .each(d => { d.angle = (d.startAngle + d.endAngle) / 2; })
+        .attr("dy", "0.35em")
+        .attr("font-size", "11px")
+        .attr("fill", fg)
+        .attr("opacity", 0)
+        .attr("transform", d => {
+          const rotate = (d.angle * 180 / Math.PI) - 90;
+          const flip = d.angle > Math.PI ? 180 : 0;
+          return "rotate(" + rotate + ") translate(" + (outerRadius + 14) + ") rotate(" + flip + ")";
+        })
+        .style("text-anchor", d => d.angle > Math.PI ? "end" : "start")
+        .text(d => {
+          const name = nodes[d.index].id;
+          return name.length > 22 ? name.substring(0, 20) + ".." : name;
+        })
+        .transition()
+        .duration(450)
+        .delay((d, i) => 260 + i * 35)
+        .attr("opacity", 0.9);
+    }
+
     function showTooltip(event, d, type) {
       const tooltip = document.getElementById("tooltip");
       const colorScale = getColorScale();
@@ -1057,7 +1299,7 @@
       } else {
         html += '<strong style="color:' + colorScale(d.group) + '">' + d.id + "</strong>";
         if (d.type !== "drug") {
-          html += '<br><span style="color:var(--muted);font-size:11px">Severity: ' + d.severity + "</span>";
+          html += '<br><span style="color:var(--muted);font-size:11px">Type: Side Effect</span>';
         }
       }
 
@@ -1087,30 +1329,59 @@
         html += '<div class="space-y-3">';
         relations.forEach(rel => {
           const target = drugData.nodes.find(n => n.id === (rel.target.id || rel.target));
+          const primarySource = rel.evidences && rel.evidences.length ? rel.evidences[0].filename : "Unknown source";
           html += '<div class="p-3 rounded-lg bg-[--bg-secondary] border border-[--border]">';
           html += '<div class="flex justify-between items-center mb-1">';
           html += '<span class="font-semibold" style="color:' + colorScale(target ? target.group : 2) + '">' + (target ? target.id : "-") + "</span>";
           html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + (Number(rel.confidence || 0) * 100).toFixed(0) + "%</span>";
           html += "</div>";
+          html += '<p class="text-xs text-[--muted]">Source: ' + primarySource + "</p>";
           html += '<div class="evidence-box" style="font-size:12px">"' + (rel.sentence || "-") + '"</div>';
           html += "</div>";
         });
         html += "</div>";
       } else {
         const drugs = drugData.links.filter(l => (l.target.id || l.target) === d.id);
-        html += '<h4 class="text-sm font-semibold mb-2 text-[--muted]">Caused by (' + drugs.length + " drugs)</h4>";
-        html += '<div class="space-y-2">';
+        const evidenceRows = [];
         drugs.forEach(lk => {
-          const source = drugData.nodes.find(n => n.id === (lk.source.id || lk.source));
-          html += '<div class="p-3 rounded-lg bg-[--bg-secondary] border border-[--border]">';
-          html += '<div class="flex justify-between items-center mb-1">';
-          html += '<span style="color:' + colorScale(1) + '">' + (source ? source.id : "-") + "</span>";
-          html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + (Number(lk.confidence || 0) * 100).toFixed(0) + "%</span>";
-          html += "</div>";
-          html += '<div class="evidence-box" style="font-size:12px">"' + (lk.sentence || "-") + '"</div>';
-          html += "</div>";
+          const drugNode = drugData.nodes.find(n => n.id === (lk.source.id || lk.source));
+          const evidences = lk.evidences && lk.evidences.length
+            ? lk.evidences
+            : [{ sentence: lk.sentence || "-", confidence: lk.confidence || 0, filename: "Unknown source" }];
+
+          evidences.forEach(ev => {
+            evidenceRows.push({
+              drug: drugNode ? drugNode.id : "-",
+              filename: ev.filename || "Unknown source",
+              sentence: ev.sentence || "-",
+              confidence: Number(ev.confidence || 0),
+            });
+          });
         });
-        html += "</div>";
+
+        const groupedBySource = new Map();
+        evidenceRows.forEach(row => {
+          if (!groupedBySource.has(row.filename)) groupedBySource.set(row.filename, []);
+          groupedBySource.get(row.filename).push(row);
+        });
+
+        html += '<h4 class="text-sm font-semibold mb-2 text-[--muted]">Found in ' + groupedBySource.size + ' paper(s)</h4>';
+        html += '<div class="space-y-3">';
+
+        Array.from(groupedBySource.entries()).forEach(([filename, rows]) => {
+          html += '<div class="p-3 rounded-lg bg-[--bg-secondary] border border-[--border]">';
+          html += '<p class="text-xs text-[--muted] mb-2">Source: <span class="mono" style="color:var(--fg)">' + filename + '</span></p>';
+          rows.slice(0, 4).forEach(row => {
+            html += '<div class="flex justify-between items-center mb-1">';
+            html += '<span style="color:' + colorScale(1) + '">' + row.drug + '</span>';
+            html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + (row.confidence * 100).toFixed(0) + '%</span>';
+            html += '</div>';
+            html += '<div class="evidence-box" style="font-size:12px">"' + row.sentence + '"</div>';
+          });
+          html += '</div>';
+        });
+
+        html += '</div>';
       }
 
       document.getElementById("info-content").innerHTML = html;
@@ -1123,26 +1394,47 @@
       document.getElementById("info-panel-overlay").classList.remove("active");
     }
 
-    async function runPipelineFromFile(file) {
-      if (!file) {
-        showError("Pilih file PDF dulu.");
+    async function runPipelineFromFile(files) {
+      if (!files || files.length === 0) {
+        showError("Pilih minimal 1 file PDF.");
+        return;
+      }
+
+      if (files.length > 5) {
+        showError("Maksimal upload 5 file PDF.");
+        return;
+      }
+
+      const invalid = files.find(f => f.type !== "application/pdf");
+      if (invalid) {
+        showError("Semua file harus berformat PDF.");
         return;
       }
 
       try {
-        setLoadingState(true, "Uploading...");
-        const upload = await uploadPDF(file);
-        currentDocId = upload.doc_id;
+        setLoadingState(true, "Uploading " + files.length + " file...");
+        const upload = await uploadPDF(files);
+
+        const documents = upload.documents || [];
+        if (!documents.length && upload.doc_id) {
+          documents.push({ doc_id: upload.doc_id, filename: upload.filename });
+        }
+        if (!documents.length) {
+          throw new Error("Tidak ada dokumen valid yang berhasil diproses");
+        }
+
+        currentDocId = documents[0].doc_id;
 
         setLoadingState(true, "Loading graph...");
-        const result = await Promise.all([
-          fetchGraph(currentDocId),
-          fetchRelations(currentDocId)
-        ]);
-        const graph = result[0];
-        const relations = result[1];
+        const graphPromises = documents.map(d => fetchGraph(d.doc_id));
+        const relationPromises = documents.map(d => fetchRelations(d.doc_id).catch(() => []));
+        const graphs = await Promise.all(graphPromises);
+        const relationList = await Promise.all(relationPromises);
+        const relations = relationList.flat();
 
-        drugData = transformApiData(graph, relations);
+        const mergedGraph = mergeGraphPayloads(graphs);
+
+        drugData = transformApiData(mergedGraph, relations);
 
         document.getElementById("mini-placeholder").style.display = "none";
         renderActiveChart();
@@ -1156,13 +1448,13 @@
 
     document.getElementById("processBtn").addEventListener("click", async () => {
       const fileInput = document.getElementById("pdfInput");
-      const file = fileInput && fileInput.files ? fileInput.files[0] : null;
-      await runPipelineFromFile(file);
+      const files = fileInput && fileInput.files ? Array.from(fileInput.files) : [];
+      await runPipelineFromFile(files);
     });
 
     document.getElementById("pdfInput").addEventListener("change", async e => {
-      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-      if (file) await runPipelineFromFile(file);
+      const files = e.target.files ? Array.from(e.target.files) : [];
+      if (files.length) await runPipelineFromFile(files);
     });
 
     document.getElementById("openFullscreenBtn").addEventListener("click", () => {

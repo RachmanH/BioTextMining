@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -17,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "albert_ner"
 
 DEVICE = 0 if torch.cuda.is_available() else -1
-SCORE_THRESH = 0.90
+SCORE_THRESH = float(os.getenv("SCORE_THRESH", "0.90"))
 
 CAUSE_PATTERNS = [
     r"cause(s|d)?",
@@ -143,10 +144,19 @@ def filter_doi(entity: str) -> bool:
 
 def filter_author(entity: str, author_list: Optional[List[str]] = None) -> bool:
     entity_clean = entity.lower().replace("-", " ").replace(",", " ").strip()
+    entity_clean = re.sub(r"\s+", " ", entity_clean)
 
     if author_list:
         for a in author_list:
-            if a and a.lower() in entity_clean:
+            a_clean = str(a or "").lower().strip()
+            if not a_clean:
+                continue
+            # Exact/near-exact match to extracted author names.
+            if (
+                entity_clean == a_clean
+                or entity_clean.startswith(a_clean + " ")
+                or entity_clean.endswith(" " + a_clean)
+            ):
                 return True
 
     parts = entity.split()
@@ -155,10 +165,6 @@ def filter_author(entity: str, author_list: Optional[List[str]] = None) -> bool:
 
     if re.match(r"^[a-z]{1,2}\s[a-z]{2,}$", entity_clean):
         return True
-
-    if len(parts) >= 2 and all(len(x) < 10 for x in parts):
-        if sum(c.isalpha() for c in entity_clean) < 15:
-            return True
 
     return False
 

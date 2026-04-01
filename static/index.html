@@ -496,7 +496,7 @@
     <div class="p-4 border-b border-[--border] bg-[--card]/80 backdrop-blur-sm z-10">
       <div class="flex items-center justify-between max-w-7xl mx-auto">
         <div class="flex items-center gap-4">
-          <h1 class="text-xl font-bold">Visualization Studio</h1>
+          <h1 class="text-xl font-bold">Visualisasi Relasi</h1>
           <span class="text-xs text-[--muted] mono px-2 py-1 rounded bg-[--border]">Live Mode</span>
         </div>
         <div class="flex items-center gap-3">
@@ -1123,7 +1123,7 @@
           .attr("stop-opacity", 0.7);
       });
 
-      svg.append("g")
+      const sankeyLinks = svg.append("g")
         .attr("fill", "none")
         .selectAll("path")
         .data(links)
@@ -1131,7 +1131,7 @@
         .attr("d", d3.sankeyLinkHorizontal())
         .attr("stroke", (d, i) => "url(#link-gradient-" + i + ")")
         .attr("stroke-width", d => Math.max(1, d.width))
-        .attr("stroke-opacity", 0.35)
+        .attr("stroke-opacity", 0)
         .on("mouseover", function(event, d) {
           d3.select(this).attr("stroke-opacity", 0.8).raise();
           showTooltip(event, {
@@ -1146,25 +1146,56 @@
           hideTooltip();
         });
 
+      sankeyLinks
+        .attr("stroke-dasharray", function() {
+          const len = this.getTotalLength();
+          return len + " " + len;
+        })
+        .attr("stroke-dashoffset", function() {
+          return this.getTotalLength();
+        })
+        .transition()
+        .duration(720)
+        .delay((d, i) => Math.min(i * 18, 360))
+        .ease(d3.easeCubicOut)
+        .attr("stroke-dashoffset", 0)
+        .attr("stroke-opacity", 0.35);
+
       const nodeG = svg.append("g").attr("class", "sankey-node").selectAll("g").data(nodes).join("g");
 
       nodeG.append("rect")
         .attr("x", d => d.x0)
-        .attr("y", d => d.y0)
+        .attr("y", d => d.y0 + 8)
         .attr("height", d => d.y1 - d.y0)
         .attr("width", d => d.x1 - d.x0)
         .attr("fill", d => colorScale(d.category))
         .attr("stroke", nodeStroke)
         .attr("stroke-width", 1.5)
         .attr("rx", 2)
+        .attr("opacity", 0)
         .on("click", (e, d) => showInfoPanel(d.original));
 
+      nodeG.select("rect")
+        .transition()
+        .duration(420)
+        .delay((d, i) => 220 + Math.min(i * 30, 300))
+        .ease(d3.easeCubicOut)
+        .attr("y", d => d.y0)
+        .attr("opacity", 1);
+
       nodeG.append("text")
-        .attr("x", d => d.x0 < width / 2 ? d.x0 - 8 : d.x1 + 8)
+        .attr("x", d => d.x0 < width / 2 ? d.x0 - 14 : d.x1 + 14)
         .attr("y", d => (d.y1 + d.y0) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", d => d.x0 < width / 2 ? "end" : "start")
-        .text(d => d.name);
+        .attr("opacity", 0)
+        .text(d => d.name)
+        .transition()
+        .duration(360)
+        .delay((d, i) => 380 + Math.min(i * 24, 260))
+        .ease(d3.easeCubicOut)
+        .attr("x", d => d.x0 < width / 2 ? d.x0 - 8 : d.x1 + 8)
+        .attr("opacity", 1);
 
       document.getElementById("nodeCount").textContent = String(nodes.length);
       document.getElementById("linkCount").textContent = String(links.length);

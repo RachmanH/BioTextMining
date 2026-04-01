@@ -578,6 +578,7 @@
     let isFullscreenActive = false;
     let currentVizMode = "network";
     let isUIMinimized = false;
+    let pendingFiles = [];
 
     function getTheme() {
       return document.documentElement.getAttribute("data-theme");
@@ -769,6 +770,51 @@
         miniPlaceholder.style.display = "flex";
         miniPlaceholder.innerHTML = '<p class="text-sm">Memproses dokumen...</p>';
       }
+    }
+
+    function setProcessButtonReadyState() {
+      const btn = document.getElementById("processBtn");
+      if (!btn) return;
+      const hasPending = pendingFiles.length > 0;
+      btn.disabled = !hasPending;
+      btn.textContent = hasPending
+        ? "Proses PDF (" + pendingFiles.length + " file)"
+        : "Proses PDF (max 5)";
+    }
+
+    function handleFileSelection(files) {
+      pendingFiles = [];
+
+      if (!files || files.length === 0) {
+        const miniPlaceholder = document.getElementById("mini-placeholder");
+        if (miniPlaceholder) {
+          miniPlaceholder.style.display = "flex";
+          miniPlaceholder.innerHTML = '<p class="text-sm">Pilih PDF dan klik Proses PDF</p>';
+        }
+        setProcessButtonReadyState();
+        return;
+      }
+
+      if (files.length > 5) {
+        showError("Maksimal upload 5 file PDF.");
+        setProcessButtonReadyState();
+        return;
+      }
+
+      const invalid = files.find(f => f.type !== "application/pdf");
+      if (invalid) {
+        showError("Semua file harus berformat PDF.");
+        setProcessButtonReadyState();
+        return;
+      }
+
+      pendingFiles = files;
+      const miniPlaceholder = document.getElementById("mini-placeholder");
+      if (miniPlaceholder) {
+        miniPlaceholder.style.display = "flex";
+        miniPlaceholder.innerHTML = '<p class="text-sm">' + pendingFiles.length + ' file siap diproses. Klik Proses PDF.</p>';
+      }
+      setProcessButtonReadyState();
     }
 
     function showError(message) {
@@ -1447,14 +1493,12 @@
     }
 
     document.getElementById("processBtn").addEventListener("click", async () => {
-      const fileInput = document.getElementById("pdfInput");
-      const files = fileInput && fileInput.files ? Array.from(fileInput.files) : [];
-      await runPipelineFromFile(files);
+      await runPipelineFromFile(pendingFiles);
     });
 
-    document.getElementById("pdfInput").addEventListener("change", async e => {
+    document.getElementById("pdfInput").addEventListener("change", e => {
       const files = e.target.files ? Array.from(e.target.files) : [];
-      if (files.length) await runPipelineFromFile(files);
+      handleFileSelection(files);
     });
 
     document.getElementById("openFullscreenBtn").addEventListener("click", () => {
@@ -1540,6 +1584,8 @@
         }
       }
     });
+
+    setProcessButtonReadyState();
   </script>
 </body>
 </html>

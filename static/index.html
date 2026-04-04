@@ -387,6 +387,146 @@
       font-weight: bold;
       color: var(--accent);
     }
+
+    .replay-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 220;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      backdrop-filter: blur(0px);
+      background: rgba(3, 7, 18, 0.18);
+      transition: opacity 0.22s ease, backdrop-filter 0.22s ease;
+    }
+
+    [data-theme="light"] .replay-overlay {
+      background: rgba(248, 250, 252, 0.28);
+    }
+
+    .replay-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+      backdrop-filter: blur(7px);
+    }
+
+    .replay-modal {
+      width: min(680px, 100%);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+      transform: scale(0.96);
+      opacity: 0;
+      transition: transform 0.22s ease, opacity 0.22s ease;
+    }
+
+    .replay-overlay.active .replay-modal {
+      transform: scale(1);
+      opacity: 1;
+    }
+
+    .replay-modal.closing {
+      transform: scale(0.98);
+      opacity: 0;
+    }
+
+    .replay-indicator {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .replay-sentence {
+      margin-top: 14px;
+      font-size: 20px;
+      line-height: 1.55;
+      min-height: 86px;
+      max-height: 150px;
+      overflow: hidden;
+      color: var(--fg);
+    }
+
+    .replay-entity {
+      border-radius: 7px;
+      padding: 1px 4px;
+      opacity: 0.28;
+      transition: opacity 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    }
+
+    .replay-entity.active {
+      opacity: 1;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 0 14px rgba(var(--accent-rgb), 0.16);
+    }
+
+    .replay-entity.drug.active {
+      background: rgba(var(--accent-rgb), 0.18);
+      color: var(--accent);
+    }
+
+    .replay-entity.effect.active {
+      background: rgba(244, 63, 94, 0.16);
+      color: var(--accent-secondary);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 0 14px rgba(244, 63, 94, 0.2);
+    }
+
+    .replay-relation-row {
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 26px;
+      color: var(--fg);
+      font-size: 14px;
+    }
+
+    .replay-link-track {
+      position: relative;
+      height: 2px;
+      width: 130px;
+      background: rgba(148, 163, 184, 0.25);
+      overflow: hidden;
+      border-radius: 999px;
+    }
+
+    .replay-link-draw {
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+      transform: scaleX(0);
+      transform-origin: left center;
+      transition: transform 0.38s ease;
+    }
+
+    .replay-link-draw.active {
+      transform: scaleX(1);
+    }
+
+    .replay-evidence-card {
+      margin-top: 16px;
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: rgba(var(--accent-rgb), 0.05);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    .replay-evidence-card.active {
+      opacity: 1;
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -458,6 +598,11 @@
             <button id="openFullscreenBtn" class="w-full mt-3 py-3 rounded-xl text-sm font-medium border border-[--accent] text-[--accent] hover:bg-[--accent]/10 transition-colors flex items-center justify-center gap-2">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
               Fullscreen View
+            </button>
+
+            <button id="openReplayBtn" class="w-full mt-3 py-3 rounded-xl text-sm font-medium border border-[--border] text-[--fg] hover:bg-[--border]/30 transition-colors flex items-center justify-center gap-2" style="display:none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>
+              Lihat Replay Ekstraksi
             </button>
           </div>
 
@@ -566,6 +711,41 @@
 
   <div id="tooltip" class="tooltip"></div>
 
+  <div id="replay-overlay" class="replay-overlay" aria-hidden="true">
+    <div id="replay-modal" class="replay-modal">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="replay-indicator mono" id="replay-indicator">Preparing extraction replay...</p>
+          <p class="text-xs text-[--muted] mt-1">Explainable extraction preview</p>
+        </div>
+        <button id="replay-skip-btn" class="btn-icon px-3 py-1.5 rounded-lg text-xs font-semibold">Skip</button>
+      </div>
+
+      <p id="replay-sentence" class="replay-sentence"></p>
+
+      <div id="replay-relation-row" class="replay-relation-row" style="display:none">
+        <span id="replay-chem" class="font-semibold text-[--accent]"></span>
+        <div class="replay-link-track"><div id="replay-link-draw" class="replay-link-draw"></div></div>
+        <span id="replay-dis" class="font-semibold text-[--accent-secondary]"></span>
+        <span id="replay-conf" class="mono text-xs px-2 py-0.5 rounded bg-[--accent]/15 text-[--accent]"></span>
+      </div>
+
+      <div id="replay-evidence" class="replay-evidence-card">
+        <p class="text-xs text-[--muted] uppercase tracking-wider mb-1">Evidence</p>
+        <p id="replay-evidence-sentence" class="text-sm text-[--fg]"></p>
+      </div>
+
+      <div id="replay-controls" class="mt-4 flex items-center justify-between gap-3" style="display:none">
+        <div class="flex items-center gap-2">
+          <button id="replay-prev-btn" class="btn-icon px-3 py-1.5 rounded-lg text-xs font-semibold">Prev</button>
+          <button id="replay-next-btn" class="btn-icon px-3 py-1.5 rounded-lg text-xs font-semibold">Next</button>
+          <button id="replay-replay-btn" class="btn-icon px-3 py-1.5 rounded-lg text-xs font-semibold">Replay</button>
+        </div>
+        <span id="replay-step-counter" class="mono text-xs text-[--muted]">0 / 0</span>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = "http://localhost:8000";
 
@@ -579,6 +759,442 @@
     let currentVizMode = "network";
     let isUIMinimized = false;
     let pendingFiles = [];
+    let isReplayRunning = false;
+    let skipReplayRequested = false;
+    let audioCtx = null;
+    let liveStepQueue = [];
+    let isLiveStepWorkerRunning = false;
+    let replayHistory = [];
+    let replayCursor = -1;
+    let liveAnimatedCount = 0;
+    let isStreamingExtraction = false;
+
+    function ensureAudioContext() {
+      if (audioCtx) return audioCtx;
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
+      return audioCtx;
+    }
+
+    function playEntitySound() {
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 860;
+      gain.gain.value = 0.0;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      gain.gain.linearRampToValueAtTime(0.018, now + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    }
+
+    function playRelationSound() {
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(420, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(240, ctx.currentTime + 0.16);
+
+      filter.type = "lowpass";
+      filter.frequency.value = 1300;
+
+      gain.gain.value = 0.0;
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      gain.gain.linearRampToValueAtTime(0.025, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    }
+
+    function escapeHtml(text) {
+      return String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function normalizeReplayEntities(sentence, entities) {
+      const len = sentence.length;
+      return (entities || [])
+        .map(e => ({
+          start: Math.max(0, Math.min(len, Number(e.start || 0))),
+          end: Math.max(0, Math.min(len, Number(e.end || 0))),
+          label: String(e.label || "").toUpperCase(),
+          text: String(e.text || ""),
+          score: Number(e.score || 0),
+        }))
+        .filter(e => e.end > e.start)
+        .sort((a, b) => a.start - b.start || b.end - a.end);
+    }
+
+    function renderReplaySentence(sentence, entities, activeCount) {
+      const el = document.getElementById("replay-sentence");
+      if (!el) return;
+
+      if (!sentence) {
+        el.textContent = "";
+        return;
+      }
+
+      let cursor = 0;
+      const parts = [];
+      const normalized = normalizeReplayEntities(sentence, entities);
+
+      normalized.forEach((ent, idx) => {
+        if (ent.start > cursor) {
+          parts.push(escapeHtml(sentence.slice(cursor, ent.start)));
+        }
+
+        const rawText = sentence.slice(ent.start, ent.end) || ent.text;
+        const isActive = idx < activeCount;
+        const isDrug = ent.label === "CHEMICAL" || ent.label === "DRUG";
+        const klass = isDrug ? "drug" : "effect";
+
+        parts.push(
+          '<span class="replay-entity ' + klass + (isActive ? ' active' : '') + '">' + escapeHtml(rawText) + '</span>'
+        );
+        cursor = ent.end;
+      });
+
+      if (cursor < sentence.length) {
+        parts.push(escapeHtml(sentence.slice(cursor)));
+      }
+
+      el.innerHTML = parts.join("");
+    }
+
+    function waitWithSkip(ms) {
+      return new Promise(resolve => {
+        if (skipReplayRequested || ms <= 0) {
+          resolve();
+          return;
+        }
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+          if (skipReplayRequested || Date.now() - startedAt >= ms) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 16);
+      });
+    }
+
+    function openReplayModal() {
+      const overlay = document.getElementById("replay-overlay");
+      const modal = document.getElementById("replay-modal");
+      if (!overlay || !modal) return;
+      modal.classList.remove("closing");
+      overlay.classList.add("active");
+      overlay.setAttribute("aria-hidden", "false");
+    }
+
+    function closeReplayModal() {
+      const overlay = document.getElementById("replay-overlay");
+      const modal = document.getElementById("replay-modal");
+      if (!overlay || !modal) return;
+
+      modal.classList.add("closing");
+      setTimeout(() => {
+        overlay.classList.remove("active");
+        overlay.setAttribute("aria-hidden", "true");
+        modal.classList.remove("closing");
+      }, 200);
+    }
+
+    function resetReplayBlocks() {
+      const relationRow = document.getElementById("replay-relation-row");
+      const evidence = document.getElementById("replay-evidence");
+      const line = document.getElementById("replay-link-draw");
+
+      if (relationRow) relationRow.style.display = "none";
+      if (evidence) evidence.classList.remove("active");
+      if (line) line.classList.remove("active");
+    }
+
+    function updateReplayControls() {
+      const controls = document.getElementById("replay-controls");
+      const counter = document.getElementById("replay-step-counter");
+      const prevBtn = document.getElementById("replay-prev-btn");
+      const nextBtn = document.getElementById("replay-next-btn");
+
+      const total = replayHistory.length;
+      if (controls) controls.style.display = total > 0 ? "flex" : "none";
+      if (counter) {
+        counter.textContent = total > 0
+          ? String(Math.max(0, replayCursor + 1)) + " / " + String(total)
+          : "0 / 0";
+      }
+      if (prevBtn) prevBtn.disabled = replayCursor <= 0;
+      if (nextBtn) nextBtn.disabled = total === 0 || replayCursor >= total - 1;
+    }
+
+    async function playReplayStepAt(index) {
+      if (index < 0 || index >= replayHistory.length) return;
+      if (isReplayRunning) return;
+
+      skipReplayRequested = false;
+      isReplayRunning = true;
+      replayCursor = index;
+      updateReplayControls();
+      openReplayModal();
+
+      const step = replayHistory[index];
+      await animateLiveStep(step, index + 1, replayHistory.length);
+
+      const indicator = document.getElementById("replay-indicator");
+      if (indicator) indicator.textContent = "Replay ready. Klik Next untuk kalimat berikutnya.";
+      isReplayRunning = false;
+      updateReplayControls();
+    }
+
+    async function animateLiveStep(step, stepIndex, totalHint) {
+      if (skipReplayRequested) return;
+
+      const indicator = document.getElementById("replay-indicator");
+      const relationRow = document.getElementById("replay-relation-row");
+      const chemEl = document.getElementById("replay-chem");
+      const disEl = document.getElementById("replay-dis");
+      const confEl = document.getElementById("replay-conf");
+      const line = document.getElementById("replay-link-draw");
+      const evidence = document.getElementById("replay-evidence");
+      const evidenceSentence = document.getElementById("replay-evidence-sentence");
+
+      const sentence = String(step.sentence || "");
+      const entities = normalizeReplayEntities(sentence, step.entities || []);
+      const relation = step.relation || {};
+
+      resetReplayBlocks();
+      if (indicator) {
+        const suffix = totalHint > 0 ? " / " + totalHint : "";
+        indicator.textContent = "Extracting entities... Step " + stepIndex + suffix;
+      }
+      renderReplaySentence(sentence, entities, 0);
+
+      for (let eIdx = 1; eIdx <= entities.length; eIdx += 1) {
+        if (skipReplayRequested) return;
+        renderReplaySentence(sentence, entities, eIdx);
+        playEntitySound();
+        await waitWithSkip(340);
+      }
+
+      if (skipReplayRequested) return;
+
+      if (indicator) indicator.textContent = "Building relation...";
+      if (chemEl) chemEl.textContent = toTitleCase(relation.chemical || "-");
+      if (disEl) disEl.textContent = toTitleCase(relation.disease || "-");
+      if (confEl) confEl.textContent = Math.round(Number(relation.confidence || 0) * 100) + "%";
+
+      if (relationRow) relationRow.style.display = "flex";
+      if (line) {
+        line.classList.remove("active");
+        requestAnimationFrame(() => line.classList.add("active"));
+      }
+      playRelationSound();
+      await waitWithSkip(420);
+
+      if (skipReplayRequested) return;
+
+      if (indicator) indicator.textContent = "Attaching evidence...";
+      if (evidenceSentence) evidenceSentence.textContent = '"' + sentence + '"';
+      if (evidence) evidence.classList.add("active");
+      await waitWithSkip(360);
+    }
+
+    async function processLiveStepQueue(totalHint) {
+      if (isLiveStepWorkerRunning) return;
+      isLiveStepWorkerRunning = true;
+
+      while (liveStepQueue.length > 0) {
+        const step = liveStepQueue.shift();
+        liveAnimatedCount += 1;
+        await animateLiveStep(step, liveAnimatedCount, totalHint);
+      }
+
+      isLiveStepWorkerRunning = false;
+    }
+
+    function enqueueLiveStep(step, totalHint) {
+      if (skipReplayRequested) return;
+      liveStepQueue.push(step);
+      processLiveStepQueue(totalHint).catch(() => {});
+    }
+
+    async function waitForLiveQueueDrain() {
+      while (liveStepQueue.length > 0 || isLiveStepWorkerRunning) {
+        await new Promise(resolve => setTimeout(resolve, 40));
+      }
+    }
+
+    function parseSSEBlock(block) {
+      const lines = block.split("\n");
+      let eventName = "message";
+      const dataLines = [];
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+
+      if (!dataLines.length) {
+        return { eventName, payload: {} };
+      }
+
+      let payload = {};
+      try {
+        payload = JSON.parse(dataLines.join("\n"));
+      } catch {
+        payload = { raw: dataLines.join("\n") };
+      }
+      return { eventName, payload };
+    }
+
+    async function uploadPDFStream(files, onEvent) {
+      const formData = new FormData();
+      files.forEach(file => formData.append("files", file));
+
+      const res = await fetch(API_BASE + "/upload/stream", { method: "POST", body: formData });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || ("HTTP " + res.status));
+      }
+
+      if (!res.body) {
+        throw new Error("Streaming response tidak tersedia");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const read = await reader.read();
+        if (read.done) break;
+
+        buffer += decoder.decode(read.value, { stream: true });
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
+
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+          const parsed = parseSSEBlock(block);
+          onEvent(parsed.eventName, parsed.payload);
+        }
+      }
+
+      if (buffer.trim()) {
+        const parsed = parseSSEBlock(buffer);
+        onEvent(parsed.eventName, parsed.payload);
+      }
+    }
+
+    async function runReplaySequence(replayData) {
+      if (!replayData || !Array.isArray(replayData.steps) || replayData.steps.length === 0) {
+        return;
+      }
+
+      isReplayRunning = true;
+      skipReplayRequested = false;
+
+      const timing = replayData.timing || {};
+      const modalOpenMs = Number(timing.modal_open_ms || 200);
+      const entityEachMs = Number(timing.entity_each_ms || 280);
+      const relationMs = Number(timing.relation_ms || 380);
+      const evidenceMs = Number(timing.evidence_ms || 380);
+      const modalCloseMs = Number(timing.modal_close_ms || 180);
+      const steps = replayData.steps;
+
+      const indicator = document.getElementById("replay-indicator");
+      const relationRow = document.getElementById("replay-relation-row");
+      const chemEl = document.getElementById("replay-chem");
+      const disEl = document.getElementById("replay-dis");
+      const confEl = document.getElementById("replay-conf");
+      const line = document.getElementById("replay-link-draw");
+      const evidence = document.getElementById("replay-evidence");
+      const evidenceSentence = document.getElementById("replay-evidence-sentence");
+
+      openReplayModal();
+      resetReplayBlocks();
+      if (indicator) indicator.textContent = "Preparing explainable extraction...";
+      await waitWithSkip(modalOpenMs);
+
+      for (let i = 0; i < steps.length; i += 1) {
+        if (skipReplayRequested) break;
+
+        const step = steps[i] || {};
+        const sentence = String(step.sentence || "");
+        const entities = normalizeReplayEntities(sentence, step.entities || []);
+        const relation = step.relation || {};
+
+        resetReplayBlocks();
+        if (indicator) {
+          indicator.textContent = "Extracting entities... Step " + (i + 1) + " / " + steps.length;
+        }
+        renderReplaySentence(sentence, entities, 0);
+
+        for (let eIdx = 1; eIdx <= entities.length; eIdx += 1) {
+          if (skipReplayRequested) break;
+          renderReplaySentence(sentence, entities, eIdx);
+          playEntitySound();
+          await waitWithSkip(entityEachMs);
+        }
+
+        if (skipReplayRequested) break;
+
+        if (indicator) indicator.textContent = "Building relation...";
+        if (chemEl) chemEl.textContent = toTitleCase(relation.chemical || "-");
+        if (disEl) disEl.textContent = toTitleCase(relation.disease || "-");
+        if (confEl) confEl.textContent = Math.round(Number(relation.confidence || 0) * 100) + "%";
+
+        if (relationRow) relationRow.style.display = "flex";
+        if (line) {
+          line.classList.remove("active");
+          requestAnimationFrame(() => line.classList.add("active"));
+        }
+        playRelationSound();
+        await waitWithSkip(relationMs);
+
+        if (skipReplayRequested) break;
+
+        if (indicator) indicator.textContent = "Attaching evidence...";
+        if (evidenceSentence) evidenceSentence.textContent = '"' + sentence + '"';
+        if (evidence) evidence.classList.add("active");
+        await waitWithSkip(evidenceMs);
+      }
+
+      if (indicator) indicator.textContent = "Transitioning to graph...";
+      await waitWithSkip(modalCloseMs);
+      closeReplayModal();
+      isReplayRunning = false;
+      skipReplayRequested = false;
+    }
 
     function getTheme() {
       return document.documentElement.getAttribute("data-theme");
@@ -1489,11 +2105,78 @@
       }
 
       try {
-        setLoadingState(true, "Uploading " + files.length + " file...");
-        const upload = await uploadPDF(files);
+        ensureAudioContext();
+        liveStepQueue = [];
+        isLiveStepWorkerRunning = false;
+        liveAnimatedCount = 0;
+        replayHistory = [];
+        replayCursor = -1;
+        isReplayRunning = true;
+        isStreamingExtraction = true;
+        skipReplayRequested = false;
 
-        const documents = upload.documents || [];
-        if (!documents.length && upload.doc_id) {
+        const indicator = document.getElementById("replay-indicator");
+        const openReplayBtn = document.getElementById("openReplayBtn");
+        if (openReplayBtn) openReplayBtn.style.display = "none";
+        openReplayModal();
+        resetReplayBlocks();
+        updateReplayControls();
+        if (indicator) indicator.textContent = "Preparing extraction stream...";
+
+        setLoadingState(true, "Streaming extraction...");
+        let upload = null;
+        let streamError = null;
+        let stepCount = 0;
+
+        await uploadPDFStream(files, (eventName, payload) => {
+          if (eventName === "status") {
+            if (indicator) indicator.textContent = payload.message || "Memulai pemrosesan...";
+            return;
+          }
+
+          if (eventName === "file_start") {
+            const fileIdx = Number(payload.file_index || 1);
+            const fileTotal = Number(payload.file_total || 1);
+            if (indicator) {
+              indicator.textContent = "Processing file " + fileIdx + " / " + fileTotal + "...";
+            }
+            return;
+          }
+
+          if (eventName === "progress") {
+            if (skipReplayRequested && indicator) {
+              const pct = Math.round(Number(payload.progress || 0) * 100);
+              indicator.textContent = "Processing in background... " + pct + "%";
+            }
+            return;
+          }
+
+          if (eventName === "step") {
+            stepCount += 1;
+            replayHistory.push(payload);
+            updateReplayControls();
+            enqueueLiveStep(payload, 0);
+            return;
+          }
+
+          if (eventName === "error") {
+            streamError = payload.message || "Terjadi error saat streaming";
+            return;
+          }
+
+          if (eventName === "complete") {
+            upload = payload;
+          }
+        });
+
+        if (streamError) {
+          throw new Error(streamError);
+        }
+
+        await waitForLiveQueueDrain();
+
+        const documents = (upload && upload.documents) || [];
+        if (!documents.length && upload && upload.doc_id) {
           documents.push({ doc_id: upload.doc_id, filename: upload.filename });
         }
         if (!documents.length) {
@@ -1502,6 +2185,7 @@
 
         currentDocId = documents[0].doc_id;
 
+        if (indicator) indicator.textContent = "Building final graph...";
         setLoadingState(true, "Loading graph...");
         const graphPromises = documents.map(d => fetchGraph(d.doc_id));
         const relationPromises = documents.map(d => fetchRelations(d.doc_id).catch(() => []));
@@ -1513,11 +2197,24 @@
 
         drugData = transformApiData(mergedGraph, relations);
 
+        await waitWithSkip(stepCount > 0 ? 180 : 0);
+        closeReplayModal();
         document.getElementById("mini-placeholder").style.display = "none";
+        setLoadingState(false);
+        isReplayRunning = false;
+        isStreamingExtraction = false;
+        skipReplayRequested = false;
+        updateReplayControls();
+        if (replayHistory.length > 0 && openReplayBtn) {
+          openReplayBtn.style.display = "flex";
+        }
+
         renderActiveChart();
         updateStats();
-        setLoadingState(false);
       } catch (err) {
+        closeReplayModal();
+        isReplayRunning = false;
+        isStreamingExtraction = false;
         setLoadingState(false);
         showError("Gagal: " + err.message);
       }
@@ -1525,6 +2222,15 @@
 
     document.getElementById("processBtn").addEventListener("click", async () => {
       await runPipelineFromFile(pendingFiles);
+    });
+
+    document.getElementById("openReplayBtn").addEventListener("click", async () => {
+      if (!replayHistory.length) return;
+      openReplayModal();
+      updateReplayControls();
+      if (replayCursor < 0) {
+        await playReplayStepAt(0);
+      }
     });
 
     document.getElementById("pdfInput").addEventListener("change", e => {
@@ -1601,6 +2307,25 @@
 
     document.getElementById("closeInfoBtn").addEventListener("click", closeInfoPanel);
     document.getElementById("info-panel-overlay").addEventListener("click", closeInfoPanel);
+    document.getElementById("replay-prev-btn").addEventListener("click", async () => {
+      if (isStreamingExtraction) return;
+      await playReplayStepAt(replayCursor - 1);
+    });
+    document.getElementById("replay-next-btn").addEventListener("click", async () => {
+      if (isStreamingExtraction) return;
+      await playReplayStepAt(replayCursor + 1);
+    });
+    document.getElementById("replay-replay-btn").addEventListener("click", async () => {
+      if (!replayHistory.length || isStreamingExtraction) return;
+      await playReplayStepAt(0);
+    });
+    document.getElementById("replay-skip-btn").addEventListener("click", () => {
+      if (isStreamingExtraction) {
+        skipReplayRequested = true;
+        liveStepQueue = [];
+      }
+      closeReplayModal();
+    });
 
     window.addEventListener("resize", () => {
       if (isFullscreenActive) renderActiveChart();

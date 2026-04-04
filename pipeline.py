@@ -306,6 +306,48 @@ def deduplicate_relations(relations: List[Dict[str, Any]]) -> List[Dict[str, Any
     return uniq
 
 
+def run_pipeline_with_entities(pdf_bytes: bytes) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Input:
+      - pdf_bytes: isi file PDF dalam bentuk bytes
+
+    Output:
+      - dict:
+        entities: list entity level dengan sentence context
+        relations: list relations deduplicated
+    """
+    sentences = extract_pdf_sentences(pdf_bytes)
+    if not sentences:
+        return {"entities": [], "relations": []}
+
+    author_list = build_author_list(sentences)
+
+    all_entities: List[Dict[str, Any]] = []
+    all_relations: List[Dict[str, Any]] = []
+
+    for sent in sentences:
+        entities = extract_entities(sent, author_list=author_list)
+        for e in entities:
+            all_entities.append(
+                {
+                    "sentence": sent,
+                    "start": int(e.get("start", -1)),
+                    "end": int(e.get("end", -1)),
+                    "label": str(e.get("label", "")),
+                    "text": str(e.get("text", "")),
+                    "score": float(e.get("score", 0.0)),
+                }
+            )
+
+        rels = extract_relations(sent, entities)
+        all_relations.extend(rels)
+
+    return {
+        "entities": all_entities,
+        "relations": deduplicate_relations(all_relations),
+    }
+
+
 def run_pipeline(pdf_bytes: bytes) -> List[Dict[str, Any]]:
     """
     Input:
@@ -315,16 +357,4 @@ def run_pipeline(pdf_bytes: bytes) -> List[Dict[str, Any]]:
       - list of relations:
         chemical, disease, sentence, rel_type, chemical_conf, disease_conf, confidence
     """
-    sentences = extract_pdf_sentences(pdf_bytes)
-    if not sentences:
-        return []
-
-    author_list = build_author_list(sentences)
-
-    all_relations: List[Dict[str, Any]] = []
-    for sent in sentences:
-        entities = extract_entities(sent, author_list=author_list)
-        rels = extract_relations(sent, entities)
-        all_relations.extend(rels)
-
-    return deduplicate_relations(all_relations)
+    return run_pipeline_with_entities(pdf_bytes)["relations"]

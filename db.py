@@ -41,6 +41,24 @@ def init_db() -> None:
         """
     )
 
+    # Entity mentah per kalimat untuk replay explainable (index-based highlight)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS entities_raw (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id TEXT NOT NULL,
+            sentence TEXT NOT NULL,
+            start_idx INTEGER NOT NULL,
+            end_idx INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            text TEXT NOT NULL,
+            score REAL NOT NULL DEFAULT 0.0,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
+        )
+        """
+    )
+
     # Relasi agregat per dokumen untuk graph cepat
     c.execute(
         """
@@ -76,6 +94,20 @@ def init_db() -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_relations_agg_doc_id
         ON relations_agg(doc_id)
+        """
+    )
+
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_entities_raw_doc_id
+        ON entities_raw(doc_id)
+        """
+    )
+
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_entities_raw_sentence
+        ON entities_raw(doc_id, sentence)
         """
     )
 

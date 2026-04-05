@@ -719,7 +719,7 @@ async def upload_pdf_stream(files: List[UploadFile] = File(...)):
                             {
                                 "doc_id": doc_id,
                                 "filename": filename,
-                                "sentence": _truncate_sentence(sent, 180),
+                                "sentence": sent,
                                 "entities": selected_entities,
                                 "relation": {
                                     "chemical": str(rel.get("chemical", "")),

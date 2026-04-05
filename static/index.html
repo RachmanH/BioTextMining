@@ -414,7 +414,7 @@
     }
 
     .replay-modal {
-      width: min(680px, 100%);
+      width: min(780px, 100%);
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 18px;
@@ -445,12 +445,28 @@
 
     .replay-sentence {
       margin-top: 14px;
-      font-size: 20px;
-      line-height: 1.55;
-      min-height: 86px;
-      max-height: 150px;
-      overflow: hidden;
+      height: 156px;
+      overflow-y: auto;
+      padding-right: 8px;
+      scroll-behavior: smooth;
+      white-space: normal;
       color: var(--fg);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    .replay-sentence::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .replay-sentence::-webkit-scrollbar-track {
+      background: rgba(148, 163, 184, 0.12);
+      border-radius: 999px;
+    }
+
+    .replay-sentence::-webkit-scrollbar-thumb {
+      background: rgba(var(--accent-rgb), 0.35);
+      border-radius: 999px;
     }
 
     .replay-entity {
@@ -477,13 +493,13 @@
     }
 
     .replay-relation-row {
-      margin-top: 16px;
+      margin-top: 14px;
       display: flex;
       align-items: center;
       gap: 10px;
       min-height: 26px;
       color: var(--fg);
-      font-size: 14px;
+      font-size: 13px;
     }
 
     .replay-link-track {
@@ -512,7 +528,7 @@
     }
 
     .replay-evidence-card {
-      margin-top: 16px;
+      margin-top: 14px;
       border: 1px solid var(--border);
       border-left: 3px solid var(--accent);
       border-radius: 12px;
@@ -721,7 +737,7 @@
         <button id="replay-skip-btn" class="btn-icon px-3 py-1.5 rounded-lg text-xs font-semibold">Skip</button>
       </div>
 
-      <p id="replay-sentence" class="replay-sentence"></p>
+      <div id="replay-sentence" class="replay-sentence"></div>
 
       <div id="replay-relation-row" class="replay-relation-row" style="display:none">
         <span id="replay-chem" class="font-semibold text-[--accent]"></span>
@@ -852,15 +868,14 @@
         .sort((a, b) => a.start - b.start || b.end - a.end);
     }
 
-    function renderReplaySentence(sentence, entities, activeCount) {
+    function resetReplayTranscript() {
       const el = document.getElementById("replay-sentence");
-      if (!el) return;
-
-      if (!sentence) {
-        el.textContent = "";
-        return;
+      if (el) {
+        el.innerHTML = "";
       }
+    }
 
+    function buildReplaySentenceHtml(sentence, entities, activeCount) {
       let cursor = 0;
       const parts = [];
       const normalized = normalizeReplayEntities(sentence, entities);
@@ -885,7 +900,23 @@
         parts.push(escapeHtml(sentence.slice(cursor)));
       }
 
-      el.innerHTML = parts.join("");
+      return parts.join("");
+    }
+
+    function renderReplaySentence(sentence, entities, activeCount) {
+      const el = document.getElementById("replay-sentence");
+      if (!el) return;
+
+      if (!sentence) {
+        resetReplayTranscript();
+        return;
+      }
+
+      const bodyHtml = buildReplaySentenceHtml(sentence, entities, activeCount);
+      el.innerHTML = bodyHtml;
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
     }
 
     function waitWithSkip(ms) {
@@ -993,11 +1024,11 @@
         const suffix = totalHint > 0 ? " / " + totalHint : "";
         indicator.textContent = "Extracting entities... Step " + stepIndex + suffix;
       }
-      renderReplaySentence(sentence, entities, 0);
+      renderReplaySentence(sentence, entities, 0, { stepIndex, totalHint });
 
       for (let eIdx = 1; eIdx <= entities.length; eIdx += 1) {
         if (skipReplayRequested) return;
-        renderReplaySentence(sentence, entities, eIdx);
+        renderReplaySentence(sentence, entities, eIdx, { stepIndex, totalHint });
         playEntitySound();
         await waitWithSkip(340);
       }
@@ -1142,6 +1173,7 @@
 
       openReplayModal();
       resetReplayBlocks();
+      resetReplayTranscript();
       if (indicator) indicator.textContent = "Preparing explainable extraction...";
       await waitWithSkip(modalOpenMs);
 
@@ -1157,11 +1189,11 @@
         if (indicator) {
           indicator.textContent = "Extracting entities... Step " + (i + 1) + " / " + steps.length;
         }
-        renderReplaySentence(sentence, entities, 0);
+        renderReplaySentence(sentence, entities, 0, { stepIndex: i + 1, totalHint: steps.length });
 
         for (let eIdx = 1; eIdx <= entities.length; eIdx += 1) {
           if (skipReplayRequested) break;
-          renderReplaySentence(sentence, entities, eIdx);
+          renderReplaySentence(sentence, entities, eIdx, { stepIndex: i + 1, totalHint: steps.length });
           playEntitySound();
           await waitWithSkip(entityEachMs);
         }
@@ -2111,6 +2143,7 @@
         liveAnimatedCount = 0;
         replayHistory = [];
         replayCursor = -1;
+        resetReplayTranscript();
         isReplayRunning = true;
         isStreamingExtraction = true;
         skipReplayRequested = false;

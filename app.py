@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import logging
 import uuid
 import os
 import json
@@ -22,6 +23,7 @@ from pipeline import (
     extract_entities,
     extract_pdf_sentences,
     extract_relations,
+    inspect_relation_sentence,
     run_pipeline,
     run_pipeline_with_entities,
 )
@@ -68,12 +70,27 @@ class NerReResponse(BaseModel):
     filename: str
     entities: List[NerEntity]
     relations: List[RelationOut]
+    debug: Dict[str, Any] | None = None
 
 
 DRUG_LABELS = {"CHEMICAL", "DRUG"}
 EFFECT_LABELS = {"DISEASE", "ADR", "ADVERSE_EVENT"}
 REPLAY_MAX_STEPS = 3
 LIVE_STEPS_MAX_PER_FILE = 0
+PIPELINE_DEBUG_TERMINAL = os.getenv("PIPELINE_DEBUG_TERMINAL", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+logger = logging.getLogger("pharmaviz.pipeline")
+
+
+def _log_pipeline_debug(message: str, payload: Dict[str, Any]) -> None:
+    if not PIPELINE_DEBUG_TERMINAL:
+        return
+    logger.info("%s | %s", message, json.dumps(payload, ensure_ascii=False))
 
 
 def _entity_key(e: Dict[str, Any]) -> Tuple[str, str, int, int, str]:
@@ -398,6 +415,17 @@ def _truncate_sentence(sentence: str, max_len: int = 180) -> str:
     return s[: max_len - 1].rstrip() + "…"
 
 
+def _build_debug_summary(sentence_count: int, entity_count: int, relation_count: int) -> Dict[str, Any]:
+    summary = {
+        "sentence_count": int(sentence_count),
+        "entity_count": int(entity_count),
+        "relation_count": int(relation_count),
+    }
+    if relation_count == 0:
+        summary["warning"] = "Tidak ada relasi yang lolos filter strict causal"
+    return summary
+
+
 @app.post("/ner/pdf", response_model=List[NerReResponse])
 async def ner_pdf(files: List[UploadFile] = File(...)):
     responses: List[NerReResponse] = []
@@ -410,9 +438,12 @@ async def ner_pdf(files: List[UploadFile] = File(...)):
         if not data:
             continue
 
+        sentences = extract_pdf_sentences(data)
+        sentence_count = len(sentences)
         result = run_pipeline_with_entities(data)
         uniq_entities = _deduplicate_entities(result["entities"])
         uniq_relations = deduplicate_relations(result["relations"])
+        debug = _build_debug_summary(sentence_count, len(uniq_entities), len(uniq_relations))
 
         responses.append(
             NerReResponse(
@@ -420,6 +451,7 @@ async def ner_pdf(files: List[UploadFile] = File(...)):
                 filename=file.filename or "unknown.pdf",
                 entities=[NerEntity(**e) for e in uniq_entities],
                 relations=[RelationOut(**r) for r in uniq_relations],
+                debug=debug,
             )
         )
 
@@ -586,17 +618,52 @@ async def upload_pdf_stream(files: List[UploadFile] = File(...)):
                 all_entities: List[Dict[str, Any]] = []
                 emitted_steps = 0
                 total_sentences = max(1, len(sentences))
+                stream_debug = {
+                    "sentences": int(len(sentences)),
+                    "entities_total": 0,
+                    "sentences_with_entities": 0,
+                    "sentences_with_both_labels": 0,
+                    "candidate_pairs": 0,
+                    "accepted_pairs": 0,
+                    "drop_no_chemical": 0,
+                    "drop_no_disease": 0,
+                    "drop_non_causal": 0,
+                    "drop_bad_span": 0,
+                    "drop_direction": 0,
+                    "drop_token_gap": 0,
+                    "drop_low_conf": 0,
+                }
 
                 for sent_idx, sent in enumerate(sentences, start=1):
                     try:
                         entities = extract_entities(sent, author_list=author_list)
                         rels = extract_relations(sent, entities)
+                        rel_debug = inspect_relation_sentence(sent, entities)
                     except Exception as e:
                         yield _sse_event(
                             "error",
                             {"message": f"Gagal inferensi kalimat ({filename}): {str(e)}"},
                         )
                         return
+
+                    stream_debug["entities_total"] += len(entities)
+                    if entities:
+                        stream_debug["sentences_with_entities"] += 1
+                    if int(rel_debug.get("chem_count", 0)) > 0 and int(rel_debug.get("disease_count", 0)) > 0:
+                        stream_debug["sentences_with_both_labels"] += 1
+
+                    for key in [
+                        "candidate_pairs",
+                        "accepted_pairs",
+                        "drop_no_chemical",
+                        "drop_no_disease",
+                        "drop_non_causal",
+                        "drop_bad_span",
+                        "drop_direction",
+                        "drop_token_gap",
+                        "drop_low_conf",
+                    ]:
+                        stream_debug[key] += int(rel_debug.get(key, 0))
 
                     all_relations.extend(rels)
                     for e in entities:
@@ -665,6 +732,8 @@ async def upload_pdf_stream(files: List[UploadFile] = File(...)):
 
                 relations = deduplicate_relations(all_relations)
                 entities = _dedupe_entities_with_sentence(all_entities)
+                debug = _build_debug_summary(len(sentences), len(entities), len(relations))
+                debug["relation_debug"] = stream_debug
 
                 try:
                     _insert_document_and_relations(doc_id, filename, relations, entities)
@@ -680,6 +749,7 @@ async def upload_pdf_stream(files: List[UploadFile] = File(...)):
                         "doc_id": doc_id,
                         "filename": filename,
                         "relations_count": len(relations),
+                        "debug": debug,
                     }
                 )
 
@@ -689,6 +759,17 @@ async def upload_pdf_stream(files: List[UploadFile] = File(...)):
                         "doc_id": doc_id,
                         "filename": filename,
                         "relations_count": len(relations),
+                        "debug": debug,
+                    },
+                )
+
+                _log_pipeline_debug(
+                    "upload_stream_file_summary",
+                    {
+                        "doc_id": doc_id,
+                        "filename": filename,
+                        "relations_count": len(relations),
+                        "debug": debug,
                     },
                 )
 
@@ -715,6 +796,15 @@ def get_graph(doc_id: str):
     conn = get_conn()
     c = conn.cursor()
 
+    doc_row = c.execute(
+        """
+        SELECT id, filename
+        FROM documents
+        WHERE id = ?
+        """,
+        (doc_id,),
+    ).fetchone()
+
     rows = c.execute(
         """
         SELECT chemical, disease, count, avg_conf
@@ -726,8 +816,16 @@ def get_graph(doc_id: str):
 
     conn.close()
 
+    if not doc_row:
+        raise HTTPException(status_code=404, detail="doc_id tidak ditemukan")
+
     if not rows:
-        raise HTTPException(status_code=404, detail="doc_id tidak ditemukan atau belum ada hasil")
+        return {
+            "doc_id": doc_id,
+            "filename": doc_row[1],
+            "nodes": [],
+            "links": [],
+        }
 
     nodes: Dict[str, Dict[str, str]] = {}
     links: List[Dict[str, Any]] = []
@@ -750,6 +848,7 @@ def get_graph(doc_id: str):
 
     return {
         "doc_id": doc_id,
+        "filename": doc_row[1],
         "nodes": list(nodes.values()),
         "links": links,
     }
@@ -762,6 +861,15 @@ def get_relations(doc_id: str):
     """
     conn = get_conn()
     c = conn.cursor()
+
+    doc_row = c.execute(
+        """
+        SELECT id
+        FROM documents
+        WHERE id = ?
+        """,
+        (doc_id,),
+    ).fetchone()
 
     rows = c.execute(
         """
@@ -776,8 +884,11 @@ def get_relations(doc_id: str):
 
     conn.close()
 
+    if not doc_row:
+        raise HTTPException(status_code=404, detail="doc_id tidak ditemukan")
+
     if not rows:
-        raise HTTPException(status_code=404, detail="Relasi mentah tidak ditemukan")
+        return []
 
     return [
         {

@@ -32,6 +32,51 @@ CAUSE_PATTERNS = [
     r"contributes? to",
 ]
 
+STRONG_CAUSE_PATTERNS = [
+    r"\bcaus(?:e|es|ed|ing)\b",
+    r"\binduc(?:e|es|ed|ing)\b",
+    r"\btrigger(?:s|ed|ing)?\b",
+    r"\blead(?:s|ing)? to\b",
+    r"\bresult(?:s|ed|ing)? in\b",
+    r"\bbring(?:s|ing)? about\b",
+    r"\bresponsible for\b",
+    r"\bcontribut(?:e|es|ed|ing) to\b",
+]
+
+WEAK_ASSOCIATION_PATTERNS = [
+    r"\bassociat(?:e|es|ed|ing) with\b",
+    r"\blink(?:s|ed|ing)? to\b",
+    r"\bcorrelat(?:e|es|ed|ing) with\b",
+]
+
+NEGATION_PATTERNS = [
+    r"\bno evidence of\b",
+    r"\bno sign of\b",
+    r"\bnot\s+(?:cause|causes|caused|causing|induce|induced|inducing|trigger|triggered|triggering|lead to|leads to|leading to|result in|results in|resulting in)\b",
+    r"\bwithout\b",
+    r"\babsence of\b",
+    r"\bnot associated with\b",
+    r"\bnon[- ]associated\b",
+]
+
+SPECULATION_PATTERNS = [
+    r"\bmay\s+(?:cause|causes|caused|causing|lead to|leads to|leading to|induce|induces|induced|inducing|trigger|triggers|triggered|triggering|result in|results in|resulting in|contribute to|contributes to|contributing to)\b",
+    r"\bmight\s+(?:cause|lead to|induce|trigger|result in|contribute to)\b",
+    r"\bcould\s+(?:cause|lead to|induce|trigger|result in|contribute to)\b",
+    r"\bcan\s+(?:cause|lead to|induce|trigger|result in|contribute to)\b",
+    r"\bpossible(?:ly)?\b",
+    r"\bpotentially\b",
+    r"\blikely\b",
+    r"\bprobably\b",
+    r"\bsuggest(?:s|ed|ing)?\b",
+    r"\bappears? to\b",
+    r"\bseems? to\b",
+]
+
+RELATION_MAX_TOKEN_GAP = int(os.getenv("RELATION_MAX_TOKEN_GAP", "18"))
+RELATION_CONF_THRESH = float(os.getenv("RELATION_CONF_THRESH", "0.50"))
+RELATION_MIN_SUPPORT = int(os.getenv("RELATION_MIN_SUPPORT", "1"))
+
 DRUG_LABELS = {"CHEMICAL", "DRUG"}
 ADR_LABELS = {"DISEASE", "ADR", "ADVERSE_EVENT"}
 
@@ -263,6 +308,122 @@ def _should_skip_section(section_name: str) -> bool:
     return section_name in {"methods", "references"}
 
 
+def _has_any_pattern(text: str, patterns: List[str]) -> bool:
+    lowered = str(text or "").lower()
+    return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in patterns)
+
+
+def _token_distance(sentence: str, left: Dict[str, Any], right: Dict[str, Any]) -> int:
+    start_left = int(left.get("start", -1))
+    end_left = int(left.get("end", -1))
+    start_right = int(right.get("start", -1))
+    end_right = int(right.get("end", -1))
+
+    if start_left < 0 or end_left < 0 or start_right < 0 or end_right < 0:
+        return 10**6
+
+    if start_left > start_right:
+        start_left, end_left, start_right, end_right = start_right, end_right, start_left, end_left
+
+    between = str(sentence or "")[end_left:start_right]
+    if not between.strip():
+        return 0
+
+    return len([token for token in re.split(r"\s+", between.strip()) if token])
+
+
+def _is_strict_causal_sentence(sentence: str) -> bool:
+    lowered = str(sentence or "").lower()
+    if not lowered:
+        return False
+    if _has_any_pattern(lowered, NEGATION_PATTERNS):
+        return False
+    if _has_any_pattern(lowered, SPECULATION_PATTERNS):
+        return False
+    if _has_any_pattern(lowered, STRONG_CAUSE_PATTERNS):
+        return True
+    if _has_any_pattern(lowered, WEAK_ASSOCIATION_PATTERNS):
+        return True
+    return False
+
+
+def _boost_relation_confidence(base_confidence: float, sentence: str) -> float:
+    confidence = float(base_confidence)
+    if _has_any_pattern(sentence, STRONG_CAUSE_PATTERNS):
+        confidence += 0.08
+    elif _has_any_pattern(sentence, WEAK_ASSOCIATION_PATTERNS):
+        confidence += 0.03
+    if _has_any_pattern(sentence, [r"\bresults? in\b", r"\bleads? to\b", r"\bcauses?\b"]):
+        confidence += 0.04
+    return min(confidence, 0.999)
+
+
+def _aggregate_relation_evidence(relations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[tuple, Dict[str, Any]] = {}
+
+    for rel in relations:
+        chemical = str(rel.get("chemical", "")).strip()
+        disease = str(rel.get("disease", "")).strip()
+        sentence = str(rel.get("sentence", "")).strip()
+        if not chemical or not disease or not sentence:
+            continue
+
+        key = (chemical.lower(), disease.lower())
+        bucket = grouped.setdefault(
+            key,
+            {
+                "chemical": chemical,
+                "disease": disease,
+                "count": 0,
+                "conf_sum": 0.0,
+                "best_confidence": -1.0,
+                "sentence": sentence,
+                "sentences": [],
+                "rel_type": "causes",
+                "chemical_conf": float(rel.get("chemical_conf", 0.0)),
+                "disease_conf": float(rel.get("disease_conf", 0.0)),
+            },
+        )
+
+        confidence = float(rel.get("confidence", 0.0))
+        bucket["count"] += 1
+        bucket["conf_sum"] += confidence
+
+        if sentence not in bucket["sentences"]:
+            bucket["sentences"].append(sentence)
+
+        if confidence >= bucket["best_confidence"]:
+            bucket["best_confidence"] = confidence
+            bucket["sentence"] = sentence
+            bucket["chemical_conf"] = float(rel.get("chemical_conf", bucket["chemical_conf"]))
+            bucket["disease_conf"] = float(rel.get("disease_conf", bucket["disease_conf"]))
+
+    aggregated: List[Dict[str, Any]] = []
+    for bucket in grouped.values():
+        if bucket["count"] < RELATION_MIN_SUPPORT:
+            continue
+
+        avg_conf = bucket["conf_sum"] / max(bucket["count"], 1)
+        if avg_conf < RELATION_CONF_THRESH:
+            continue
+
+        aggregated.append(
+            {
+                "sentence": bucket["sentence"],
+                "chemical": bucket["chemical"],
+                "disease": bucket["disease"],
+                "rel_type": bucket["rel_type"],
+                "chemical_conf": float(bucket["chemical_conf"]),
+                "disease_conf": float(bucket["disease_conf"]),
+                "confidence": float(avg_conf),
+                "support_count": int(bucket["count"]),
+                "evidence_sentences": bucket["sentences"][:3],
+            }
+        )
+
+    return sorted(aggregated, key=lambda item: (-float(item.get("confidence", 0.0)), -int(item.get("support_count", 0))))
+
+
 def _extract_sentence_units_from_pdf_text(raw_text: str) -> List[Dict[str, Any]]:
     """
     Extract sentence units with section context.
@@ -389,6 +550,69 @@ def extract_entities(
     return entities
 
 
+def inspect_relation_sentence(sent: str, entities: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Inspect one sentence and explain how many relation pairs were dropped by each rule."""
+    chems = [e for e in entities if e["label"].upper() in DRUG_LABELS]
+    dises = [e for e in entities if e["label"].upper() in ADR_LABELS]
+
+    summary: Dict[str, Any] = {
+        "sentence": sent,
+        "chem_count": len(chems),
+        "disease_count": len(dises),
+        "strict_causal": _is_strict_causal_sentence(sent),
+        "candidate_pairs": len(chems) * len(dises),
+        "accepted_pairs": 0,
+        "drop_no_chemical": 0,
+        "drop_no_disease": 0,
+        "drop_non_causal": 0,
+        "drop_bad_span": 0,
+        "drop_direction": 0,
+        "drop_token_gap": 0,
+        "drop_low_conf": 0,
+        "max_token_gap": RELATION_MAX_TOKEN_GAP,
+        "confidence_threshold": RELATION_CONF_THRESH,
+    }
+
+    if not chems:
+        summary["drop_no_chemical"] = 1
+        return summary
+
+    if not dises:
+        summary["drop_no_disease"] = 1
+        return summary
+
+    if not summary["strict_causal"]:
+        summary["drop_non_causal"] = summary["candidate_pairs"]
+        return summary
+
+    for c in chems:
+        for d in dises:
+            c_start = int(c.get("start", -1))
+            d_start = int(d.get("start", -1))
+            if c_start < 0 or d_start < 0:
+                summary["drop_bad_span"] += 1
+                continue
+
+            if c_start >= d_start:
+                summary["drop_direction"] += 1
+                continue
+
+            token_gap = _token_distance(sent, c, d)
+            if token_gap > RELATION_MAX_TOKEN_GAP:
+                summary["drop_token_gap"] += 1
+                continue
+
+            avg_conf = (float(c["score"]) + float(d["score"])) / 2.0
+            avg_conf = _boost_relation_confidence(avg_conf, sent)
+            if avg_conf < RELATION_CONF_THRESH:
+                summary["drop_low_conf"] += 1
+                continue
+
+            summary["accepted_pairs"] += 1
+
+    return summary
+
+
 def extract_relations(sent: str, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     chems = [e for e in entities if e["label"].upper() in DRUG_LABELS]
     dises = [e for e in entities if e["label"].upper() in ADR_LABELS]
@@ -396,13 +620,30 @@ def extract_relations(sent: str, entities: List[Dict[str, Any]]) -> List[Dict[st
     if not chems or not dises:
         return []
 
-    rel_type = "causes" if any(re.search(p, sent.lower()) for p in CAUSE_PATTERNS) else "mention"
-    pair_max: Dict[tuple, Dict[str, Any]] = {}
+    if not _is_strict_causal_sentence(sent):
+        return []
 
-    for c in chems:
-        for d in dises:
+    pair_max: Dict[tuple, Dict[str, Any]] = {}
+    ordered_chems = sorted(chems, key=lambda item: (int(item.get("start", -1)), int(item.get("end", -1))))
+    ordered_dises = sorted(dises, key=lambda item: (int(item.get("start", -1)), int(item.get("end", -1))))
+
+    for c in ordered_chems:
+        for d in ordered_dises:
+            if int(c.get("start", -1)) < 0 or int(d.get("start", -1)) < 0:
+                continue
+            if int(c.get("start", -1)) >= int(d.get("start", -1)):
+                continue
+
+            token_gap = _token_distance(sent, c, d)
+            if token_gap > RELATION_MAX_TOKEN_GAP:
+                continue
+
             pair = (c["text"], d["text"])
             avg_conf = (float(c["score"]) + float(d["score"])) / 2.0
+            avg_conf = _boost_relation_confidence(avg_conf, sent)
+
+            if avg_conf < RELATION_CONF_THRESH:
+                continue
 
             prev = pair_max.get(pair)
             if prev is None or avg_conf > prev["confidence"]:
@@ -410,7 +651,7 @@ def extract_relations(sent: str, entities: List[Dict[str, Any]]) -> List[Dict[st
                     "sentence": sent,
                     "chemical": c["text"],
                     "disease": d["text"],
-                    "rel_type": rel_type,
+                    "rel_type": "causes",
                     "chemical_conf": float(c["score"]),
                     "disease_conf": float(d["score"]),
                     "confidence": float(avg_conf),
@@ -481,9 +722,11 @@ def run_pipeline_with_entities(pdf_bytes: bytes) -> Dict[str, List[Dict[str, Any
         rels = extract_relations(sent, entities)
         all_relations.extend(rels)
 
+    deduped_relations = deduplicate_relations(all_relations)
+
     return {
         "entities": all_entities,
-        "relations": deduplicate_relations(all_relations),
+        "relations": _aggregate_relation_evidence(deduped_relations),
     }
 
 

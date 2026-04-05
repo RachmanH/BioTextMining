@@ -19,6 +19,8 @@ MODEL_DIR = BASE_DIR / "albert_ner"
 
 DEVICE = 0 if torch.cuda.is_available() else -1
 SCORE_THRESH = float(os.getenv("SCORE_THRESH", "0.90"))
+ABSTRACT_WEIGHT = float(os.getenv("ABSTRACT_WEIGHT", "0.85"))
+DEFAULT_SECTION_WEIGHT = float(os.getenv("DEFAULT_SECTION_WEIGHT", "1.0"))
 
 CAUSE_PATTERNS = [
     r"cause(s|d)?",
@@ -67,6 +69,24 @@ GENERIC_WORDS = {
     "medrxiv",
     "biorxiv",
 }
+
+SECTION_ALIASES = {
+    "abstract": "abstract",
+    "methods": "methods",
+    "material and methods": "methods",
+    "materials and methods": "methods",
+    "results": "results",
+    "discussion": "discussion",
+    "conclusion": "conclusion",
+    "conclusions": "conclusion",
+    "references": "references",
+    "reference": "references",
+}
+
+SECTION_HEADING_RE = re.compile(
+    r"^\s*(abstract|methods?|materials? and methods?|results?|discussion|conclusions?|references?|reference)\s*[:\.]?\s*$",
+    re.IGNORECASE,
+)
 
 
 # =========================
@@ -211,19 +231,120 @@ def clean_entity_text(text: str) -> str:
     return text.strip()
 
 
+def _normalize_section_name(section_name: Optional[str]) -> str:
+    """Map a raw heading to a canonical section name."""
+    normalized = str(section_name or "").strip().lower()
+    return SECTION_ALIASES.get(normalized, normalized)
+
+
+def _detect_section_heading(line: str) -> Optional[str]:
+    """Detect simple section headings from PDF lines."""
+    match = SECTION_HEADING_RE.match(str(line or "").strip())
+    if not match:
+        return None
+
+    heading = match.group(1).strip().lower()
+    return _normalize_section_name(heading)
+
+
+def _section_weight(section_name: str) -> float:
+    """Assign trust weight to a section before NER and relation extraction."""
+    section_name = _normalize_section_name(section_name)
+    if section_name == "abstract":
+        return ABSTRACT_WEIGHT
+    if section_name == "results":
+        return 1.0
+    return DEFAULT_SECTION_WEIGHT
+
+
+def _should_skip_section(section_name: str) -> bool:
+    """Skip sections that are too noisy for relation extraction."""
+    section_name = _normalize_section_name(section_name)
+    return section_name in {"methods", "references"}
+
+
+def _extract_sentence_units_from_pdf_text(raw_text: str) -> List[Dict[str, Any]]:
+    """
+    Extract sentence units with section context.
+
+    References are dropped entirely, Methods are skipped, Abstract is kept but downweighted,
+    and Results are kept as the primary target section.
+    """
+    lines = [re.sub(r"\s+", " ", line).strip() for line in str(raw_text or "").splitlines()]
+
+    units: List[Dict[str, Any]] = []
+    current_section = "unknown"
+    buffer: List[str] = []
+
+    def flush_buffer() -> None:
+        nonlocal buffer
+        if not buffer:
+            return
+
+        block = " ".join(buffer).strip()
+        buffer = []
+        if not block or _should_skip_section(current_section):
+            return
+
+        weight = _section_weight(current_section)
+        sentences = nltk.sent_tokenize(block)
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) <= 10:
+                continue
+            units.append(
+                {
+                    "sentence": sentence,
+                    "section": _normalize_section_name(current_section),
+                    "weight": weight,
+                }
+            )
+
+    for line in lines:
+        if not line:
+            continue
+
+        heading = _detect_section_heading(line)
+        if heading:
+            flush_buffer()
+            current_section = heading
+            continue
+
+        # Heuristic: preserve content until a new heading appears.
+        buffer.append(line)
+
+    flush_buffer()
+
+    # If no headings are detected, fall back to normal sentence splitting with default weight.
+    if units:
+        return units
+
+    fallback_sentences = nltk.sent_tokenize(re.sub(r"\s+", " ", str(raw_text or "")).strip())
+    return [
+        {
+            "sentence": sentence.strip(),
+            "section": "unknown",
+            "weight": DEFAULT_SECTION_WEIGHT,
+        }
+        for sentence in fallback_sentences
+        if len(sentence.strip()) > 10
+    ]
+
+
 def extract_pdf_sentences(pdf_bytes: bytes) -> List[str]:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     all_text = []
     for page in doc:
         all_text.append(page.get_text("text"))
     raw_text = "\n".join(all_text)
+
     raw_text = re.sub(r"\s+", " ", raw_text).strip()
 
     if not raw_text:
         return []
 
-    sentences = nltk.sent_tokenize(raw_text)
-    return [s.strip() for s in sentences if len(s.strip()) > 10]
+    sentence_units = _extract_sentence_units_from_pdf_text(raw_text)
+    return [str(unit.get("sentence", "")).strip() for unit in sentence_units if str(unit.get("sentence", "")).strip()]
 
 
 def build_author_list(sentences: List[str], take_n: int = 5) -> List[str]:
@@ -237,13 +358,17 @@ def build_author_list(sentences: List[str], take_n: int = 5) -> List[str]:
     return list(set(author_list))
 
 
-def extract_entities(sent: str, author_list: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def extract_entities(
+    sent: str,
+    author_list: Optional[List[str]] = None,
+    section_weight: float = DEFAULT_SECTION_WEIGHT,
+) -> List[Dict[str, Any]]:
     nlp = _load_hf_pipeline()
     entities: List[Dict[str, Any]] = []
 
     for ent in nlp(sent):
         label = (ent.get("entity_group") or ent.get("entity") or "").upper()
-        score = float(ent.get("score", 1.0))
+        score = float(ent.get("score", 1.0)) * float(section_weight)
         text = clean_entity_text(ent.get("word", ""))
 
         if score < SCORE_THRESH:
@@ -316,21 +441,35 @@ def run_pipeline_with_entities(pdf_bytes: bytes) -> Dict[str, List[Dict[str, Any
         entities: list entity level dengan sentence context
         relations: list relations deduplicated
     """
-    sentences = extract_pdf_sentences(pdf_bytes)
-    if not sentences:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    all_text = []
+    for page in doc:
+        all_text.append(page.get_text("text"))
+    raw_text = "\n".join(all_text).strip()
+
+    if not raw_text:
         return {"entities": [], "relations": []}
 
-    author_list = build_author_list(sentences)
+    sentence_units = _extract_sentence_units_from_pdf_text(raw_text)
+    if not sentence_units:
+        return {"entities": [], "relations": []}
+
+    author_list = build_author_list([unit["sentence"] for unit in sentence_units])
 
     all_entities: List[Dict[str, Any]] = []
     all_relations: List[Dict[str, Any]] = []
 
-    for sent in sentences:
-        entities = extract_entities(sent, author_list=author_list)
+    for unit in sentence_units:
+        sent = str(unit.get("sentence", "")).strip()
+        section_name = _normalize_section_name(unit.get("section", "unknown"))
+        section_weight = float(unit.get("weight", DEFAULT_SECTION_WEIGHT))
+
+        entities = extract_entities(sent, author_list=author_list, section_weight=section_weight)
         for e in entities:
             all_entities.append(
                 {
                     "sentence": sent,
+                    "section": section_name,
                     "start": int(e.get("start", -1)),
                     "end": int(e.get("end", -1)),
                     "label": str(e.get("label", "")),

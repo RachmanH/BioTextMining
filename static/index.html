@@ -935,6 +935,12 @@
       });
     }
 
+    function formatRawConfidence(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "0.000";
+      return n.toFixed(3);
+    }
+
     function openReplayModal() {
       const overlay = document.getElementById("replay-overlay");
       const modal = document.getElementById("replay-modal");
@@ -1038,7 +1044,7 @@
       if (indicator) indicator.textContent = "Building relation...";
       if (chemEl) chemEl.textContent = toTitleCase(relation.chemical || "-");
       if (disEl) disEl.textContent = toTitleCase(relation.disease || "-");
-      if (confEl) confEl.textContent = Math.round(Number(relation.confidence || 0) * 100) + "%";
+      if (confEl) confEl.textContent = formatRawConfidence(relation.confidence);
 
       if (relationRow) relationRow.style.display = "flex";
       if (line) {
@@ -1203,7 +1209,7 @@
         if (indicator) indicator.textContent = "Building relation...";
         if (chemEl) chemEl.textContent = toTitleCase(relation.chemical || "-");
         if (disEl) disEl.textContent = toTitleCase(relation.disease || "-");
-        if (confEl) confEl.textContent = Math.round(Number(relation.confidence || 0) * 100) + "%";
+        if (confEl) confEl.textContent = formatRawConfidence(relation.confidence);
 
         if (relationRow) relationRow.style.display = "flex";
         if (line) {
@@ -2017,7 +2023,7 @@
 
       if (type === "sankey") {
         html += '<strong style="color:var(--fg)">' + (d.id || "-") + "</strong>";
-        html += '<br><span style="color:var(--accent)">Confidence: ' + (Number(d.value || 0) * 100).toFixed(0) + "%</span>";
+        html += '<br><span style="color:var(--accent)">Confidence: ' + formatRawConfidence(d.value) + "</span>";
         if (d.sentence) {
           html += '<p style="color:var(--muted);margin-top:4px;font-size:11px">"' + d.sentence + '"</p>';
         }
@@ -2058,7 +2064,7 @@
           html += '<div class="p-3 rounded-lg bg-[--bg-secondary] border border-[--border]">';
           html += '<div class="flex justify-between items-center mb-1">';
           html += '<span class="font-semibold" style="color:' + colorScale(target ? target.group : 2) + '">' + (target ? target.id : "-") + "</span>";
-          html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + (Number(rel.confidence || 0) * 100).toFixed(0) + "%</span>";
+          html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + formatRawConfidence(rel.confidence) + "</span>";
           html += "</div>";
           html += '<p class="text-xs text-[--muted]">Source: ' + primarySource + "</p>";
           html += '<div class="evidence-box" style="font-size:12px">"' + (rel.sentence || "-") + '"</div>';
@@ -2099,7 +2105,7 @@
           rows.slice(0, 4).forEach(row => {
             html += '<div class="flex justify-between items-center mb-1">';
             html += '<span style="color:' + colorScale(1) + '">' + row.drug + '</span>';
-            html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + (row.confidence * 100).toFixed(0) + '%</span>';
+            html += '<span class="text-xs mono px-2 py-0.5 rounded bg-[--accent]/20 text-[--accent]">' + formatRawConfidence(row.confidence) + '</span>';
             html += '</div>';
             html += '<div class="evidence-box" style="font-size:12px">"' + row.sentence + '"</div>';
           });

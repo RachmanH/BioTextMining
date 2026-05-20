@@ -17,7 +17,74 @@ from transformers import AutoModelForTokenClassification, AutoTokenizer, pipelin
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "albert_ner"
 
-DEVICE = 0 if torch.cuda.is_available() else -1
+def _env_flag(value: str) -> Optional[bool]:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on", "cuda", "gpu"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off", "cpu"}:
+        return False
+    return None
+
+
+def _resolve_device_choice() -> tuple[int, str, str]:
+    """
+    Resolve inference device from terminal environment.
+
+    Preferred:
+      PHARMAVIZ_DEVICE=auto|cuda|cpu
+
+    Backward-friendly shortcut:
+      USE_CUDA=1|0
+    """
+    cuda_available = torch.cuda.is_available()
+    requested = os.getenv("PHARMAVIZ_DEVICE")
+
+    if requested is None:
+        use_cuda = _env_flag(os.getenv("USE_CUDA", "auto"))
+        if use_cuda is True:
+            requested = "cuda"
+        elif use_cuda is False:
+            requested = "cpu"
+        else:
+            requested = "auto"
+
+    requested = str(requested or "auto").strip().lower()
+
+    if requested in {"cuda", "gpu"}:
+        if cuda_available:
+            return 0, "cuda", "cuda:0"
+        return -1, "cuda", "cpu"
+
+    if requested == "cpu":
+        return -1, "cpu", "cpu"
+
+    if requested != "auto":
+        print(
+            f"[PharmaViz] Nilai PHARMAVIZ_DEVICE='{requested}' tidak dikenal; fallback ke auto.",
+            flush=True,
+        )
+        requested = "auto"
+
+    return (0, "auto", "cuda:0") if cuda_available else (-1, "auto", "cpu")
+
+
+DEVICE, DEVICE_REQUESTED, DEVICE_LABEL = _resolve_device_choice()
+GPU_NAME = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+print(
+    "[PharmaViz] Inference device: "
+    f"requested={DEVICE_REQUESTED}, resolved={DEVICE_LABEL}, "
+    f"cuda_available={torch.cuda.is_available()}"
+    + (f", gpu={GPU_NAME}" if GPU_NAME else ""),
+    flush=True,
+)
+
+if DEVICE_REQUESTED == "cuda" and DEVICE == -1:
+    print(
+        "[PharmaViz] CUDA diminta dari terminal, tetapi PyTorch tidak mendeteksi CUDA. "
+        "Pipeline fallback ke CPU.",
+        flush=True,
+    )
+
 SCORE_THRESH = float(os.getenv("SCORE_THRESH", "0.90"))
 ABSTRACT_WEIGHT = float(os.getenv("ABSTRACT_WEIGHT", "0.85"))
 DEFAULT_SECTION_WEIGHT = float(os.getenv("DEFAULT_SECTION_WEIGHT", "1.0"))

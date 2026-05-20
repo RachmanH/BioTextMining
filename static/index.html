@@ -784,6 +784,8 @@
     let replayCursor = -1;
     let liveAnimatedCount = 0;
     let isStreamingExtraction = false;
+    let lastFullscreenSoundMode = null;
+    const audioVolumeBoost = 3.0;
 
     function ensureAudioContext() {
       if (audioCtx) return audioCtx;
@@ -809,7 +811,7 @@
       gain.connect(ctx.destination);
 
       const now = ctx.currentTime;
-      gain.gain.linearRampToValueAtTime(0.018, now + 0.005);
+      gain.gain.linearRampToValueAtTime(0.018 * audioVolumeBoost, now + 0.005);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
       osc.start(now);
       osc.stop(now + 0.1);
@@ -839,10 +841,115 @@
       gain.connect(ctx.destination);
 
       const now = ctx.currentTime;
-      gain.gain.linearRampToValueAtTime(0.025, now + 0.02);
+      gain.gain.linearRampToValueAtTime(0.025 * audioVolumeBoost, now + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19);
       osc.start(now);
       osc.stop(now + 0.2);
+    }
+
+    function playModeSound(mode) {
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+
+      const now = ctx.currentTime;
+
+      const createNoiseSource = () => {
+        const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.6, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i += 1) {
+          data[i] = (Math.random() * 2) - 1;
+        }
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        return source;
+      };
+
+      if (mode === "sankey") {
+        const source = createNoiseSource();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+        const sweep = ctx.createBiquadFilter();
+
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(1400, now);
+        filter.Q.value = 0.7;
+
+        sweep.type = "lowpass";
+        sweep.frequency.setValueAtTime(2800, now);
+        sweep.frequency.exponentialRampToValueAtTime(900, now + 0.24);
+
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.022 * audioVolumeBoost, now + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+
+        source.connect(filter);
+        filter.connect(sweep);
+        sweep.connect(gain);
+        gain.connect(ctx.destination);
+        source.start(now);
+        source.stop(now + 0.28);
+        return;
+      }
+
+      if (mode === "chord") {
+        const source = createNoiseSource();
+        const master = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+        const sweep = ctx.createBiquadFilter();
+
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(920, now);
+        filter.Q.value = 1.1;
+
+        sweep.type = "highpass";
+        sweep.frequency.setValueAtTime(180, now);
+        sweep.frequency.exponentialRampToValueAtTime(520, now + 0.28);
+
+        master.gain.setValueAtTime(0.0001, now);
+        master.gain.exponentialRampToValueAtTime(0.02 * audioVolumeBoost, now + 0.02);
+        master.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+
+        source.connect(filter);
+        filter.connect(sweep);
+        sweep.connect(master);
+        master.connect(ctx.destination);
+        source.start(now);
+        source.stop(now + 0.34);
+        return;
+      }
+
+      const oscA = ctx.createOscillator();
+      const oscB = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      oscA.type = "sine";
+      oscB.type = "sine";
+      oscA.frequency.setValueAtTime(740, now);
+      oscB.frequency.setValueAtTime(980, now);
+      oscA.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+      oscB.frequency.exponentialRampToValueAtTime(1180, now + 0.08);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.016 * audioVolumeBoost, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+
+      oscA.connect(gain);
+      oscB.connect(gain);
+      gain.connect(ctx.destination);
+      oscA.start(now);
+      oscB.start(now);
+      oscA.stop(now + 0.12);
+      oscB.stop(now + 0.12);
+    }
+
+    function maybePlayFullscreenModeSound() {
+      if (!isFullscreenActive || !drugData.nodes.length) return;
+      if (lastFullscreenSoundMode === currentVizMode) return;
+      lastFullscreenSoundMode = currentVizMode;
+      playModeSound(currentVizMode);
     }
 
     function escapeHtml(text) {
@@ -1529,6 +1636,8 @@
         } else {
           createNetworkChart("fullscreen-chart", window.innerWidth, window.innerHeight - 70, false);
         }
+
+        maybePlayFullscreenModeSound();
       }
     }
 
@@ -2295,6 +2404,7 @@
 
     document.getElementById("closeFullscreenBtn").addEventListener("click", () => {
       isFullscreenActive = false;
+      lastFullscreenSoundMode = null;
       document.getElementById("fullscreen-container").classList.remove("active");
       if (simulations.full) simulations.full.stop();
     });
@@ -2340,6 +2450,9 @@
         document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
         this.classList.add("active");
         currentVizMode = this.dataset.mode;
+        if (isFullscreenActive) {
+          lastFullscreenSoundMode = null;
+        }
         renderActiveChart();
       });
     });
